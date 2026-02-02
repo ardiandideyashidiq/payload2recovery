@@ -20,7 +20,7 @@ create_update_binary() {
 
 package_flashable_zip() {
     local base_name=""
-    local timestamp=$(date +%H:%M)
+    local timestamp=$(date +%H%M)
     
     if [ -n "$INPUT_FILE_NAME" ]; then
         base_name=$(basename "$INPUT_FILE_NAME" .zip)
