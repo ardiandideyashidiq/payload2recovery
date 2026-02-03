@@ -70,8 +70,9 @@ calculate_group_table_size() {
         return 1
     fi
     
-    # No overhead - use exact size for precise allocation
-    local calculated_size="$total_size"
+    # Add 20% overhead for safety and future updates
+    local overhead=$((total_size / 5))
+    local calculated_size=$((total_size + overhead))
     
     # Round up to nearest 1MB (1048576 bytes)
     local remainder=$((calculated_size % 1048576))
@@ -83,7 +84,7 @@ calculate_group_table_size() {
     local calculated_mb=$((calculated_size / 1024 / 1024))
     
     log_info "Total partition size: ${total_mb} MB"
-    log_info "Calculated GROUP_TABLE_SIZE: ${calculated_mb} MB (exact size)"
+    log_info "Calculated GROUP_TABLE_SIZE: ${calculated_mb} MB (with 20% overhead)"
     
     GROUP_TABLE_SIZE="$calculated_size"
     return 0
