@@ -32,6 +32,7 @@ dev = [
 
 [project.scripts]
 payload2recovery = "payload2recovery.cli:main"
+p2r = "payload2recovery.cli:main"
 
 [tool.hatch.build]
 include = [

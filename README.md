@@ -9,6 +9,7 @@ It is not a general A/B OTA installer. It extracts payload partitions, converts 
 ```bash
 uv tool install .
 payload2recovery doctor
+p2r doctor
 ```
 
 For local development:
@@ -16,12 +17,14 @@ For local development:
 ```bash
 uv sync
 uv run payload2recovery doctor
+uv run p2r doctor
 ```
 
 ## Usage
 
 ```bash
 payload2recovery build ota.zip
+p2r ota.zip
 payload2recovery build ota.zip -p system vendor product
 payload2recovery build ota.zip --all
 payload2recovery list-partitions ota.zip
@@ -29,7 +32,7 @@ payload2recovery inspect ota.zip
 payload2recovery benchmark ota.zip --benchmark-report benchmark.json
 ```
 
-The root `./payload2recovery` shim also works in a source checkout.
+The root `./payload2recovery` and `./p2r` shims also work in a source checkout.
 
 ## Key Options
 
@@ -67,6 +70,7 @@ output_name_max_len = 40
 ```bash
 uv run --group dev pytest
 uv run payload2recovery doctor
+uv run p2r --help
 uv run payload2recovery --help
 python3 -m payload2recovery --help
 ```

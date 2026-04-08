@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`src/payload2recovery/` contains the application code. `cli.py` defines commands, `pipeline.py` orchestrates builds, `backends.py` wraps extraction and conversion helpers, and `packaging.py` writes recovery metadata and the final ZIP. Packaged runtime assets live under `src/payload2recovery/assets/`. Repo-local defaults live in `config/`, tests live in `tests/`, and the root `payload2recovery` script is a source-checkout shim.
+`src/payload2recovery/` contains the application code. `cli.py` defines commands, `pipeline.py` orchestrates builds, `backends.py` wraps extraction and conversion helpers, and `packaging.py` writes recovery metadata and the final ZIP. Packaged runtime assets live under `src/payload2recovery/assets/`. Repo-local defaults live in `config/`, tests live in `tests/`, and the root `payload2recovery` and `p2r` scripts are source-checkout shims.
 
 ## Build, Test, and Development Commands
 Install with `./install.sh` or `uv tool install .`. Use `uv sync` for local development. Common checks:
@@ -9,6 +9,7 @@ Install with `./install.sh` or `uv tool install .`. Use `uv sync` for local deve
 ```bash
 uv run --group dev pytest
 uv run payload2recovery doctor
+uv run p2r doctor
 uv run payload2recovery build ota.zip -p system vendor
 ```
 
