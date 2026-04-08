@@ -39,7 +39,7 @@ uv tool install .
 From a GitHub repository:
 
 ```bash
-uv tool install git+https://github.com/<owner>/<repo>.git
+uv tool install git+https://github.com/rdndds/payload2recovery.git
 ```
 
 Both installed commands are supported:
