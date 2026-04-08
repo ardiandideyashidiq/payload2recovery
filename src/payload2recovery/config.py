@@ -17,7 +17,6 @@ class Settings:
     brotli_workers: int = 0
     compression: bool = True
     verbose: bool = True
-    output_name_max_len: int = 40
     group_table: str = "main"
     group_table_size: int | None = None
     payload_dumper_go_binary: Path | None = None
@@ -51,9 +50,6 @@ def load_settings(config_dir: Path, default_partitions_file: Path) -> Settings:
         settings.brotli_workers = int(tool.get("brotli_workers", settings.brotli_workers))
         settings.compression = bool(tool.get("compression", settings.compression))
         settings.verbose = bool(tool.get("verbose", settings.verbose))
-        settings.output_name_max_len = int(
-            tool.get("output_name_max_len", settings.output_name_max_len)
-        )
         settings.group_table = str(tool.get("group_table", settings.group_table))
         raw_binary = tool.get("payload_dumper_go_binary")
         if raw_binary:

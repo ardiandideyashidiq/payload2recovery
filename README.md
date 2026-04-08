@@ -93,7 +93,7 @@ Source checkouts also include these launchers:
 Default final output:
 
 - Output directory: `output/` next to the input OTA
-- Output filename: `<ota_name>_recovery.zip`
+- Output filename: `<ota_name>-recovery.zip`
 
 Default temporary workspace:
 
@@ -138,7 +138,6 @@ compression = true
 verbose = true
 group_table = "main"
 group_table_size = 9663676416
-output_name_max_len = 60
 # payload_dumper_go_binary = "/usr/local/bin/payload-dumper-go"
 ```
 
@@ -176,4 +175,3 @@ This project depends on and bundles work from other projects.
 - Python `brotli`
   - Used for host-side Brotli compression
   - Package: https://pypi.org/project/Brotli/
-

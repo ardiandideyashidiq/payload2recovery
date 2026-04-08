@@ -532,8 +532,6 @@ def _output_name(options: BuildOptions, settings: Settings) -> str:
         name = options.output_name
     else:
         base = options.ota_zip.stem.removesuffix("_ota").removeprefix("ota_")
-        if len(base) > settings.output_name_max_len:
-            base = base[: settings.output_name_max_len]
         name = f"{base}-recovery.zip"
     return name if name.endswith(".zip") else f"{name}.zip"
 

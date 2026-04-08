@@ -2,8 +2,14 @@ from pathlib import Path
 import json
 import zipfile
 
+from payload2recovery.config import Settings
 from payload2recovery.models import BuildOptions, BuildResult
-from payload2recovery.pipeline import _partition_support, _write_benchmark_report, detect_device_assertion
+from payload2recovery.pipeline import (
+    _output_name,
+    _partition_support,
+    _write_benchmark_report,
+    detect_device_assertion,
+)
 
 
 def test_write_benchmark_report(tmp_path: Path) -> None:
@@ -69,3 +75,15 @@ def test_partition_support_marks_raw_boot_artifacts_unsupported(tmp_path: Path) 
     supported, unsupported = _partition_support(extracted)
     assert supported == {"system", "product"}
     assert unsupported == {"boot", "vendor_boot", "vbmeta"}
+
+
+def test_output_name_keeps_full_long_ota_stem() -> None:
+    options = BuildOptions(
+        ota_zip=Path("ota_super_extraordinarily_verbose_release_candidate_build_name_2026.zip"),
+        mode="template",
+    )
+
+    assert (
+        _output_name(options, Settings())
+        == "super_extraordinarily_verbose_release_candidate_build_name_2026-recovery.zip"
+    )

@@ -16,7 +16,6 @@ compression = true
 verbose = true
 group_table = "main"
 group_table_size = 9126805504
-output_name_max_len = 40
 # payload_dumper_go_binary = "/usr/local/bin/payload-dumper-go"
 ```
 
