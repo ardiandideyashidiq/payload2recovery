@@ -1,0 +1,13 @@
+[tool.payload2recovery]
+brotli_level = 5
+zip_level = 6
+payload_threads = 0
+extractor_workers = 0
+converter_workers = 0
+brotli_workers = 0
+compression = true
+verbose = true
+group_table = "main"
+group_table_size = 9663676416
+output_name_max_len = 40
+# payload_dumper_go_binary = "/usr/local/bin/payload-dumper-go"
