@@ -96,7 +96,9 @@ def detect_device_assertion(ota_zip: Path) -> DeviceAssertion:
     )
 
 
-def build(options: BuildOptions, settings: Settings, resources: ResourcePaths) -> BuildResult:
+def build(
+    options: BuildOptions, settings: Settings, resources: ResourcePaths
+) -> BuildResult:
     require_host_dependencies()
     if not options.ota_zip.exists():
         raise ValidationError(f"File not found: {options.ota_zip}")
@@ -118,17 +120,25 @@ def build(options: BuildOptions, settings: Settings, resources: ResourcePaths) -
         partitions_dir.mkdir(parents=True, exist_ok=True)
         stage_output_dir.mkdir(parents=True, exist_ok=True)
 
-        with stage_timer("Extracting payload.bin", LOGGER), metrics.stage("extract_payload_bin"):
+        with (
+            stage_timer("Extracting payload.bin", LOGGER),
+            metrics.stage("extract_payload_bin"),
+        ):
             payload_bin = extract_payload_bin(options.ota_zip, workspace)
 
-        with stage_timer("Extracting partition images", LOGGER), metrics.stage("extract_partitions"):
+        with (
+            stage_timer("Extracting partition images", LOGGER),
+            metrics.stage("extract_partitions"),
+        ):
             extracted = run_payload_extractor(
                 extractor=extractor_binary,
                 payload_path=payload_bin,
                 output_dir=partitions_dir,
                 workers=_resolved_extractor_workers(options, settings),
                 verbose=settings.verbose,
-                selected_partitions=options.custom_partitions if options.mode == "manual" else None,
+                selected_partitions=options.custom_partitions
+                if options.mode == "manual"
+                else None,
             )
         if not extracted:
             raise ValidationError("No partition images were extracted from payload.bin")
@@ -137,8 +147,9 @@ def build(options: BuildOptions, settings: Settings, resources: ResourcePaths) -
         selected = _select_partitions(extracted, options, settings)
         validate_partition_layout([path.stem for path in selected])
 
-        with stage_timer("Converting selected partitions", LOGGER), metrics.stage(
-            "convert_partitions"
+        with (
+            stage_timer("Converting selected partitions", LOGGER),
+            metrics.stage("convert_partitions"),
         ):
             artifacts, partition_metrics = _process_partitions(
                 selected,
@@ -150,10 +161,14 @@ def build(options: BuildOptions, settings: Settings, resources: ResourcePaths) -
 
         group_size = options.group_table_size or settings.group_table_size
         if group_size is None:
-            group_size = calculate_group_table_size([artifact.image_size for artifact in artifacts])
+            group_size = calculate_group_table_size(
+                [artifact.image_size for artifact in artifacts]
+            )
         op_list = stage_output_dir / "dynamic_partitions_op_list"
         updater_script = stage_output_dir / "updater-script"
-        write_dynamic_partitions_op_list(op_list, options.group_table, group_size, artifacts)
+        write_dynamic_partitions_op_list(
+            op_list, options.group_table, group_size, artifacts
+        )
         if device_assertion.enabled:
             LOGGER.info(
                 "Adding device assertion for %s from %s",
@@ -161,8 +176,12 @@ def build(options: BuildOptions, settings: Settings, resources: ResourcePaths) -
                 device_assertion.source,
             )
         else:
-            LOGGER.warning("Skipping device assertion: no reliable OTA device metadata found")
-        write_updater_script(updater_script, artifacts, device_assertion=device_assertion)
+            LOGGER.warning(
+                "Skipping device assertion: no reliable OTA device metadata found"
+            )
+        write_updater_script(
+            updater_script, artifacts, device_assertion=device_assertion
+        )
 
         output_name = _output_name(options, settings)
         final_output = (output_dir / output_name).resolve()
@@ -170,8 +189,33 @@ def build(options: BuildOptions, settings: Settings, resources: ResourcePaths) -
         meta_dir.mkdir(parents=True, exist_ok=True)
         updater_script.replace(meta_dir / "updater-script")
 
-        with stage_timer("Building flashable ZIP", LOGGER), metrics.stage("package_zip"):
-            build_flashable_zip(stage_output_dir, resources.update_binary, final_output, options.zip_level)
+        with (
+            stage_timer("Building flashable ZIP", LOGGER),
+            metrics.stage("package_zip"),
+        ):
+            zip_progress = LiveProgress(enabled=settings.verbose)
+            try:
+                build_flashable_zip(
+                    stage_output_dir,
+                    resources.update_binary,
+                    final_output,
+                    options.zip_level,
+                    progress_callback=lambda current_file,
+                    files_done,
+                    total_files,
+                    bytes_done,
+                    total_bytes,
+                    store_entry: zip_progress.update_package(
+                        current_file,
+                        files_done,
+                        total_files,
+                        bytes_done,
+                        total_bytes,
+                        store_entry=store_entry,
+                    ),
+                )
+            finally:
+                zip_progress.close()
 
         LOGGER.info("Created %s (%s)", final_output, human_size(final_output))
         result = BuildResult(
@@ -187,18 +231,32 @@ def build(options: BuildOptions, settings: Settings, resources: ResourcePaths) -
                 "supported_extracted_partitions": sorted(supported_partitions),
                 "unsupported_extracted_partitions": sorted(unsupported_partitions),
                 "extractor_workers": _resolved_extractor_workers(options, settings),
-                "converter_workers": _resolved_converter_workers(options, settings, len(selected)),
-                "brotli_workers": _resolved_brotli_workers(options, settings, len(selected)),
+                "converter_workers": _resolved_converter_workers(
+                    options, settings, len(selected)
+                ),
+                "brotli_workers": _resolved_brotli_workers(
+                    options, settings, len(selected)
+                ),
                 "device_assertion_enabled": device_assertion.enabled,
                 "device_assertion_names": device_assertion.device_names,
                 "device_assertion_source": device_assertion.source,
                 "artifact_size_bytes": final_output.stat().st_size,
-                "converter_version": artifacts[0].converter_version if artifacts else "",
+                "converter_version": artifacts[0].converter_version
+                if artifacts
+                else "",
                 "brotli_backend": "python-brotli",
-                "brotli_backend_version": artifacts[0].metrics.get("brotli_backend_version", "") if artifacts else "",
+                "brotli_backend_version": artifacts[0].metrics.get(
+                    "brotli_backend_version", ""
+                )
+                if artifacts
+                else "",
                 "partition_metrics": partition_metrics,
-                "total_raw_dat_bytes": sum(artifact.raw_dat_size for artifact in artifacts),
-                "total_compressed_bytes": sum(artifact.compressed_size for artifact in artifacts),
+                "total_raw_dat_bytes": sum(
+                    artifact.raw_dat_size for artifact in artifacts
+                ),
+                "total_compressed_bytes": sum(
+                    artifact.compressed_size for artifact in artifacts
+                ),
             },
         )
         if options.benchmark_report:
@@ -233,7 +291,9 @@ def list_partitions(
             output_dir=workspace / "partitions",
             workers=_resolved_extractor_workers(options, settings),
             verbose=settings.verbose,
-            selected_partitions=options.custom_partitions if options.mode == "manual" else None,
+            selected_partitions=options.custom_partitions
+            if options.mode == "manual"
+            else None,
         )
         supported, _ = _partition_support(extracted)
         return [
@@ -303,8 +363,15 @@ def _build_partition_artifact(
             stage_callback=lambda stage: progress.update(partition, stage),
         )
         new_dat = converter_result.new_dat
+        progress.update(partition, "waiting-brotli")
         with brotli_gate:
-            progress.update(partition, "brotli")
+            progress.update(
+                partition,
+                "brotli",
+                processed_bytes=0,
+                total_bytes=new_dat.stat().st_size,
+                output_bytes=0,
+            )
             brotli_started = time.perf_counter()
             compression_result = compress_brotli(
                 new_dat,
@@ -312,6 +379,13 @@ def _build_partition_artifact(
                 enabled=settings.compression and not options.no_brotli,
                 verbose=False,
                 workers=_resolved_brotli_workers(options, settings, 1),
+                progress_callback=lambda processed, total, written: progress.update(
+                    partition,
+                    "brotli",
+                    processed_bytes=processed,
+                    total_bytes=total,
+                    output_bytes=written,
+                ),
             )
             metrics["brotli_seconds"] = time.perf_counter() - brotli_started
         metrics["brotli_backend"] = compression_result.backend
@@ -324,8 +398,8 @@ def _build_partition_artifact(
             else 0.0
         )
         metrics["compression_mib_per_sec"] = (
-            (compression_result.input_size / (1024 * 1024)) / max(metrics["brotli_seconds"], 0.000001)
-        )
+            compression_result.input_size / (1024 * 1024)
+        ) / max(metrics["brotli_seconds"], 0.000001)
         patch_dat = stage_output_dir / f"{partition}.patch.dat"
         if not patch_dat.exists():
             patch_dat.write_bytes(b"")
@@ -350,7 +424,9 @@ def _build_partition_artifact(
         raise
 
 
-def _select_partitions(extracted: list[Path], options: BuildOptions, settings: Settings) -> list[Path]:
+def _select_partitions(
+    extracted: list[Path], options: BuildOptions, settings: Settings
+) -> list[Path]:
     available = {path.stem: path for path in extracted}
     supported, unsupported = _partition_support(extracted)
     if options.mode == "manual":
@@ -361,13 +437,17 @@ def _select_partitions(extracted: list[Path], options: BuildOptions, settings: S
         selected = [available[name] for name in sorted(supported)]
         skipped = sorted(unsupported)
         if skipped:
-            LOGGER.warning("Skipping unsupported partitions in --all mode: %s", ", ".join(skipped))
+            LOGGER.warning(
+                "Skipping unsupported partitions in --all mode: %s", ", ".join(skipped)
+            )
     else:
         requested = settings.default_partitions
         selected = [available[name] for name in requested if name in available]
         skipped = [name for name in requested if name not in available]
     if not selected:
-        raise ValidationError("None of the requested partitions were found in the OTA payload")
+        raise ValidationError(
+            "None of the requested partitions were found in the OTA payload"
+        )
     if skipped:
         if options.mode == "manual":
             LOGGER.warning("Skipping unavailable partitions: %s", ", ".join(skipped))
@@ -427,7 +507,9 @@ def _resolved_extractor_workers(options: BuildOptions, settings: Settings) -> in
     return settings.resolved_extractor_workers()
 
 
-def _resolved_converter_workers(options: BuildOptions, settings: Settings, partition_count: int) -> int:
+def _resolved_converter_workers(
+    options: BuildOptions, settings: Settings, partition_count: int
+) -> int:
     _ = partition_count
     if options.converter_workers > 0:
         return max(1, options.converter_workers)
@@ -436,7 +518,9 @@ def _resolved_converter_workers(options: BuildOptions, settings: Settings, parti
     return settings.resolved_converter_workers(partition_count)
 
 
-def _resolved_brotli_workers(options: BuildOptions, settings: Settings, partition_count: int) -> int:
+def _resolved_brotli_workers(
+    options: BuildOptions, settings: Settings, partition_count: int
+) -> int:
     _ = partition_count
     if options.brotli_workers > 0:
         return max(1, options.brotli_workers)
@@ -450,11 +534,13 @@ def _output_name(options: BuildOptions, settings: Settings) -> str:
         base = options.ota_zip.stem.removesuffix("_ota").removeprefix("ota_")
         if len(base) > settings.output_name_max_len:
             base = base[: settings.output_name_max_len]
-        name = f"{base}_recovery.zip"
+        name = f"{base}-recovery.zip"
     return name if name.endswith(".zip") else f"{name}.zip"
 
 
-def _write_benchmark_report(path: Path, options: BuildOptions, result: BuildResult) -> None:
+def _write_benchmark_report(
+    path: Path, options: BuildOptions, result: BuildResult
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "ota_zip": str(options.ota_zip),

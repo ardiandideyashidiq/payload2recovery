@@ -1,8 +1,10 @@
 from pathlib import Path
+import zipfile
 
 from payload2recovery.models import DeviceAssertion, PartitionArtifact
 from payload2recovery.packaging import (
     calculate_group_table_size,
+    build_flashable_zip,
     validate_partition_layout,
     write_dynamic_partitions_op_list,
     write_updater_script,
@@ -66,8 +68,6 @@ def test_write_updater_script_with_device_assertion(tmp_path: Path) -> None:
 
 
 def test_build_flashable_zip_creates_output_parent(tmp_path: Path) -> None:
-    from payload2recovery.packaging import build_flashable_zip
-
     payload_dir = tmp_path / "payload"
     payload_dir.mkdir()
     (payload_dir / "system.transfer.list").write_text("4\n1\n0\n")
@@ -84,3 +84,56 @@ def test_build_flashable_zip_creates_output_parent(tmp_path: Path) -> None:
     build_flashable_zip(payload_dir, update_binary, output_zip, zip_level=0)
 
     assert output_zip.exists()
+
+
+def test_build_flashable_zip_reports_monotonic_progress(tmp_path: Path) -> None:
+    payload_dir = tmp_path / "payload"
+    payload_dir.mkdir()
+    (payload_dir / "system.transfer.list").write_text("4\n1\n0\n")
+    (payload_dir / "system.new.dat.br").write_bytes(b"a" * (9 * 1024 * 1024))
+    (payload_dir / "system.patch.dat").write_bytes(b"")
+    meta_dir = payload_dir / "META-INF" / "com" / "google" / "android"
+    meta_dir.mkdir(parents=True)
+    (meta_dir / "updater-script").write_text("ui_print(\"ok\");\n")
+
+    update_binary = tmp_path / "update-binary"
+    update_binary.write_bytes(b"binary")
+    output_zip = tmp_path / "result.zip"
+    events: list[tuple[str, int, int, int, int, bool]] = []
+
+    build_flashable_zip(
+        payload_dir,
+        update_binary,
+        output_zip,
+        zip_level=6,
+        progress_callback=lambda current_file, files_done, total_files, bytes_done, total_bytes, store_entry: events.append(
+            (current_file, files_done, total_files, bytes_done, total_bytes, store_entry)
+        ),
+    )
+
+    assert output_zip.exists()
+    assert events
+    assert events[0][1] == 0
+    assert events[-1][1] == events[-1][2]
+    assert events[-1][3] == events[-1][4]
+    assert [event[3] for event in events] == sorted(event[3] for event in events)
+
+
+def test_build_flashable_zip_stores_brotli_entries(tmp_path: Path) -> None:
+    payload_dir = tmp_path / "payload"
+    payload_dir.mkdir()
+    (payload_dir / "system.transfer.list").write_text("4\n1\n0\n")
+    (payload_dir / "system.new.dat.br").write_bytes(b"payload")
+    (payload_dir / "system.patch.dat").write_bytes(b"")
+    meta_dir = payload_dir / "META-INF" / "com" / "google" / "android"
+    meta_dir.mkdir(parents=True)
+    (meta_dir / "updater-script").write_text("ui_print(\"ok\");\n")
+
+    update_binary = tmp_path / "update-binary"
+    update_binary.write_bytes(b"binary")
+    output_zip = tmp_path / "result.zip"
+    build_flashable_zip(payload_dir, update_binary, output_zip, zip_level=6)
+
+    with zipfile.ZipFile(output_zip) as archive:
+        assert archive.getinfo("system.new.dat.br").compress_type == zipfile.ZIP_STORED
+        assert archive.getinfo("system.transfer.list").compress_type == zipfile.ZIP_DEFLATED

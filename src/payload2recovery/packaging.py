@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Callable
 import zipfile
 
 from payload2recovery.errors import UnsupportedLayoutError
@@ -117,22 +118,44 @@ def build_flashable_zip(
     update_binary: Path,
     output_path: Path,
     zip_level: int,
+    progress_callback: Callable[[str, int, int, int, int, bool], None] | None = None,
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     meta_dir = payload_dir / "META-INF" / "com" / "google" / "android"
     meta_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(update_binary, meta_dir / "update-binary")
 
+    file_entries = [path for path in sorted(payload_dir.rglob("*")) if path.is_file()]
+    total_files = len(file_entries)
+    total_bytes = sum(path.stat().st_size for path in file_entries)
     compression = zipfile.ZIP_STORED if zip_level == 0 else zipfile.ZIP_DEFLATED
     compresslevel = None if zip_level == 0 else zip_level
     with zipfile.ZipFile(output_path, "w", compression=compression, compresslevel=compresslevel) as archive:
-        for file_path in sorted(payload_dir.rglob("*")):
-            if file_path.is_file():
-                arcname = file_path.relative_to(payload_dir)
-                if file_path.suffix == ".br":
-                    archive.write(file_path, arcname, compress_type=zipfile.ZIP_STORED)
-                else:
-                    archive.write(file_path, arcname)
+        bytes_done = 0
+        for index, file_path in enumerate(file_entries, start=1):
+            arcname = file_path.relative_to(payload_dir)
+            store_entry = file_path.suffix == ".br"
+            if progress_callback is not None:
+                progress_callback(
+                    arcname.as_posix(),
+                    index - 1,
+                    total_files,
+                    bytes_done,
+                    total_bytes,
+                    store_entry,
+                )
+            bytes_done = _write_zip_entry(
+                archive,
+                file_path,
+                arcname,
+                zip_level,
+                bytes_done,
+                total_bytes,
+                total_files,
+                index,
+                store_entry,
+                progress_callback,
+            )
     return output_path
 
 
@@ -141,3 +164,36 @@ def human_size(path: Path) -> str:
     if result.returncode == 0 and result.stdout:
         return result.stdout.split()[0]
     return f"{path.stat().st_size} bytes"
+
+
+def _write_zip_entry(
+    archive: zipfile.ZipFile,
+    file_path: Path,
+    arcname: Path,
+    zip_level: int,
+    bytes_done: int,
+    total_bytes: int,
+    total_files: int,
+    file_index: int,
+    store_entry: bool,
+    progress_callback: Callable[[str, int, int, int, int, bool], None] | None,
+) -> int:
+    zip_info = zipfile.ZipInfo.from_file(file_path, arcname.as_posix())
+    zip_info.compress_type = zipfile.ZIP_STORED if store_entry or zip_level == 0 else zipfile.ZIP_DEFLATED
+    if zip_info.compress_type == zipfile.ZIP_DEFLATED:
+        zip_info._compresslevel = zip_level
+
+    with file_path.open("rb") as src, archive.open(zip_info, "w", force_zip64=True) as dst:
+        while chunk := src.read(8 * 1024 * 1024):
+            dst.write(chunk)
+            bytes_done += len(chunk)
+            if progress_callback is not None:
+                progress_callback(
+                    arcname.as_posix(),
+                    file_index,
+                    total_files,
+                    bytes_done,
+                    total_bytes,
+                    store_entry,
+                )
+    return bytes_done

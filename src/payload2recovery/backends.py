@@ -98,6 +98,7 @@ def compress_brotli(
     enabled: bool,
     verbose: bool,
     workers: int = 0,
+    progress_callback: Callable[[int, int, int], None] | None = None,
 ) -> CompressionResult:
     output_file = input_file.with_suffix(input_file.suffix + ".br")
     input_size = input_file.stat().st_size
@@ -117,7 +118,7 @@ def compress_brotli(
 
     if verbose:
         LOGGER.info("Compressing %s with python-brotli level %d", input_file.name, level)
-    _compress_brotli_in_process(input_file, output_file, level)
+    _compress_brotli_in_process(input_file, output_file, level, progress_callback=progress_callback)
     if not output_file.exists():
         raise ValidationError(f"Brotli output missing: {output_file}")
     return CompressionResult(
@@ -267,16 +268,33 @@ def _converter_version() -> str:
     return "img2sdat-1.7-captured"
 
 
-def _compress_brotli_in_process(input_file: Path, output_file: Path, level: int) -> None:
+def _compress_brotli_in_process(
+    input_file: Path,
+    output_file: Path,
+    level: int,
+    progress_callback: Callable[[int, int, int], None] | None = None,
+) -> None:
     compressor = brotli.Compressor(mode=brotli.MODE_GENERIC, quality=level, lgwin=24)
+    total_bytes = input_file.stat().st_size
+    processed_bytes = 0
+    written_bytes = 0
     with input_file.open("rb") as src, output_file.open("wb") as dst:
+        if progress_callback is not None:
+            progress_callback(0, total_bytes, 0)
         while chunk := src.read(8 * 1024 * 1024):
+            processed_bytes += len(chunk)
             compressed = compressor.process(chunk)
             if compressed:
                 dst.write(compressed)
+                written_bytes += len(compressed)
+            if progress_callback is not None:
+                progress_callback(processed_bytes, total_bytes, written_bytes)
         tail = compressor.finish()
         if tail:
             dst.write(tail)
+            written_bytes += len(tail)
+        if progress_callback is not None:
+            progress_callback(total_bytes, total_bytes, written_bytes)
     input_file.unlink()
 
 
