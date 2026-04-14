@@ -9,27 +9,15 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from payload2recovery import __version__
 from payload2recovery.backends import (
     benchmark_converter,
     compress_brotli,
-    extract_payload_bin,
     require_host_dependencies,
-    resolve_payload_dumper_go_binary,
-    run_payload_extractor,
 )
-from payload2recovery.config import Settings
 from payload2recovery.errors import ValidationError
 from payload2recovery.logging import stage_timer
 from payload2recovery.metrics import MetricsCollector
-from payload2recovery.models import (
-    BuildOptions,
-    BuildResult,
-    DeviceAssertion,
-    ListedPartition,
-    PartitionArtifact,
-    RawImageSpec,
-)
+from payload2recovery.models import DeviceAssertion, PartitionArtifact
 from payload2recovery.packaging import (
     build_flashable_zip,
     calculate_group_table_size,
@@ -37,140 +25,117 @@ from payload2recovery.packaging import (
     human_size,
     validate_partition_layout,
     write_dynamic_partitions_op_list,
-    write_updater_script,
 )
 from payload2recovery.progress import LiveProgress
-from payload2recovery.resources import ResourcePaths
+
+from port2recovery import __version__
+from port2recovery.config import Settings, load_manifest
+from port2recovery.models import BuildOptions, BuildResult, ListedPartition, RawImageSpec
+from port2recovery.packaging import write_updater_script
+from port2recovery.resources import ResourcePaths
 
 
 LOGGER = logging.getLogger(__name__)
 
-_UNSUPPORTED_PARTITIONS = {"super", "userdata", "metadata"}
-_DEFAULT_RAW_PARTITIONS = {"logo", "lk"}
-_EXPLICIT_RAW_PARTITIONS = {"boot", "init_boot", "vendor_boot", "dtbo", "recovery"}
-_EXPLICIT_RAW_PREFIXES = ("vbmeta",)
-
 
 def doctor(settings: Settings | None = None) -> dict[str, object]:
+    _ = settings
     require_host_dependencies()
-    if settings is None:
-        raise ValidationError("Settings are required for doctor")
-    binary = resolve_payload_dumper_go_binary(
-        settings.payload_dumper_go_binary or Path("missing"),
-        settings.payload_dumper_go_binary,
-    )
     return {
         "status": "ok",
         "version": __version__,
-        "extractor": str(binary),
+        "converter": "python",
+        "compression": "python-brotli",
     }
 
 
-def inspect_ota(ota_zip: Path) -> dict[str, str | int]:
-    if not ota_zip.exists():
-        raise ValidationError(f"File not found: {ota_zip}")
-    return {"ota_zip": str(ota_zip), "size": ota_zip.stat().st_size}
+def inspect_rom(rom_dir: Path, settings: Settings) -> dict[str, object]:
+    manifest = load_manifest(rom_dir)
+    raw_images = _effective_raw_images(rom_dir, manifest)
+    logical_images = _discover_logical_images(rom_dir)
+    supported, unsupported = _partition_support(logical_images)
+    return {
+        "rom_dir": str(rom_dir.resolve()),
+        "logical_images": sorted(path.name for path in logical_images),
+        "supported_partitions": sorted(supported),
+        "unsupported_partitions": sorted(unsupported),
+        "raw_images": [
+            {
+                "file": raw_image.file,
+                "target": raw_image.target,
+                "slot_policy": raw_image.slot_policy,
+                "source": raw_image.source,
+                "exists": (rom_dir / raw_image.file).exists(),
+            }
+            for raw_image in raw_images
+        ],
+        "manifest_present": (rom_dir / "port2recovery.toml").exists(),
+        "assert_devices": manifest.assert_devices,
+        "group_table": manifest.group_table or settings.group_table,
+        "group_table_size": manifest.group_table_size
+        if manifest.group_table_size is not None
+        else settings.group_table_size,
+    }
 
 
-def detect_device_assertion(ota_zip: Path) -> DeviceAssertion:
-    import zipfile
-
-    candidates: set[str] = set()
-    source = ""
-    with zipfile.ZipFile(ota_zip) as archive:
-        metadata_name = "META-INF/com/android/metadata"
-        if metadata_name in archive.namelist():
-            metadata = archive.read(metadata_name).decode("utf-8", errors="replace")
-            for raw_line in metadata.splitlines():
-                line = raw_line.strip()
-                if not line or "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                key = key.strip()
-                value = value.strip()
-                if key == "pre-device" and value:
-                    candidates.add(value)
-                    source = metadata_name
-                elif key == "post-build" and value:
-                    parts = value.split("/")
-                    if len(parts) >= 2 and parts[1]:
-                        candidates.add(parts[1])
-                        source = metadata_name
-    return DeviceAssertion(
-        device_names=sorted(candidates),
-        source=source,
-        enabled=bool(candidates),
-    )
+def list_partitions(options: BuildOptions, settings: Settings) -> list[ListedPartition]:
+    require_host_dependencies()
+    logical_images = _discover_logical_images(options.rom_dir)
+    supported, _ = _partition_support(logical_images)
+    return [
+        ListedPartition(
+            name=path.stem,
+            supported=path.stem in supported,
+        )
+        for path in logical_images
+    ]
 
 
 def build(
     options: BuildOptions, settings: Settings, resources: ResourcePaths
 ) -> BuildResult:
     require_host_dependencies()
-    if not options.ota_zip.exists():
-        raise ValidationError(f"File not found: {options.ota_zip}")
-    if options.ota_zip.suffix.lower() != ".zip":
-        raise ValidationError("Only .zip OTA inputs are supported")
+    if not options.rom_dir.exists():
+        raise ValidationError(f"Directory not found: {options.rom_dir}")
+    if not options.rom_dir.is_dir():
+        raise ValidationError(f"Input is not a directory: {options.rom_dir}")
 
-    extractor_binary = resolve_payload_dumper_go_binary(
-        resources.payload_extractor,
-        options.payload_dumper_go_binary or settings.payload_dumper_go_binary,
-    )
-    device_assertion = detect_device_assertion(options.ota_zip)
-    banner_lines = discover_banner_lines(options.ota_zip.parent)
-    output_dir = (options.output_dir or options.ota_zip.parent / "output").resolve()
+    manifest = load_manifest(options.rom_dir)
+    device_assertion = _manifest_device_assertion(manifest)
+    banner_lines = discover_banner_lines(options.rom_dir)
+    output_dir = (options.output_dir or options.rom_dir / "output").resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     metrics = MetricsCollector()
+    logical_images = _discover_logical_images(options.rom_dir)
+    if not logical_images:
+        raise ValidationError(f"No logical partition images found in {options.rom_dir}")
+
+    selected = _select_partitions(logical_images, options, settings)
+    validate_partition_layout([path.stem for path in selected])
+    raw_images = _resolve_raw_images(options.rom_dir, _effective_raw_images(options.rom_dir, manifest))
 
     with _workspace(options) as workspace:
-        partitions_dir = workspace / "partitions"
+        logical_input_dir = workspace / "logical_images"
         stage_output_dir = workspace / "package"
-        partitions_dir.mkdir(parents=True, exist_ok=True)
+        logical_input_dir.mkdir(parents=True, exist_ok=True)
         stage_output_dir.mkdir(parents=True, exist_ok=True)
 
         with (
-            stage_timer("Extracting payload.bin", LOGGER),
-            metrics.stage("extract_payload_bin"),
+            stage_timer("Staging logical images", LOGGER),
+            metrics.stage("stage_logical_images"),
         ):
-            payload_bin = extract_payload_bin(options.ota_zip, workspace)
-
-        with (
-            stage_timer("Extracting partition images", LOGGER),
-            metrics.stage("extract_partitions"),
-        ):
-            extracted = run_payload_extractor(
-                extractor=extractor_binary,
-                payload_path=payload_bin,
-                output_dir=partitions_dir,
-                workers=_resolved_extractor_workers(options, settings),
-                verbose=settings.verbose,
-                selected_partitions=_extractor_selected_partitions(options),
+            staged_selected, padding_metadata = _stage_logical_images(
+                options.rom_dir,
+                logical_input_dir,
+                selected,
             )
-        if not extracted:
-            raise ValidationError("No partition images were extracted from payload.bin")
-
-        (
-            logical_partitions,
-            default_raw_images,
-            explicit_raw_images,
-            unsupported_partitions,
-        ) = _classify_extracted_partitions(extracted)
-        selected, staged_raw_images = _select_partitions(
-            extracted,
-            options,
-            settings,
-            default_raw_images,
-            explicit_raw_images,
-            unsupported_partitions,
-        )
-        validate_partition_layout([path.stem for path in selected])
 
         with (
             stage_timer("Converting selected partitions", LOGGER),
             metrics.stage("convert_partitions"),
         ):
             artifacts, partition_metrics = _process_partitions(
-                selected,
+                staged_selected,
                 stage_output_dir,
                 options,
                 settings,
@@ -181,9 +146,14 @@ def build(
             stage_timer("Staging raw images", LOGGER),
             metrics.stage("stage_raw_images"),
         ):
-            staged_raw_images = _stage_raw_images(stage_output_dir, staged_raw_images)
+            staged_raw_images = _stage_raw_images(options.rom_dir, stage_output_dir, raw_images)
 
-        group_size = options.group_table_size or settings.group_table_size
+        group_table = options.group_table or manifest.group_table or settings.group_table
+        group_size = options.group_table_size
+        if group_size is None:
+            group_size = manifest.group_table_size
+        if group_size is None:
+            group_size = settings.group_table_size
         if group_size is None:
             group_size = calculate_group_table_size(
                 [artifact.image_size for artifact in artifacts]
@@ -191,27 +161,17 @@ def build(
         op_list = stage_output_dir / "dynamic_partitions_op_list"
         updater_script = stage_output_dir / "updater-script"
         write_dynamic_partitions_op_list(
-            op_list, options.group_table, group_size, artifacts
+            op_list, group_table, group_size, artifacts
         )
-        if device_assertion.enabled:
-            LOGGER.info(
-                "Adding device assertion for %s from %s",
-                ", ".join(device_assertion.device_names),
-                device_assertion.source,
-            )
-        else:
-            LOGGER.warning(
-                "Skipping device assertion: no reliable OTA device metadata found"
-            )
         write_updater_script(
             updater_script,
             artifacts,
-            raw_images=staged_raw_images,
+            staged_raw_images,
             device_assertion=device_assertion,
             banner_lines=banner_lines,
         )
 
-        output_name = _output_name(options, settings)
+        output_name = _output_name(options)
         final_output = (output_dir / output_name).resolve()
         meta_dir = stage_output_dir / "META-INF" / "com" / "google" / "android"
         meta_dir.mkdir(parents=True, exist_ok=True)
@@ -250,16 +210,10 @@ def build(
             output_path=final_output,
             stage_timings=metrics.stage_timings,
             build_metadata={
-                "extractor": "payload-dumper-go",
-                "extractor_binary": str(extractor_binary),
-                "converter": "python",
                 "selection_mode": options.mode,
                 "partition_count": len(artifacts),
                 "selected_partitions": [artifact.name for artifact in artifacts],
-                "supported_extracted_partitions": sorted(logical_partitions),
-                "default_raw_extracted_partitions": sorted(default_raw_images),
-                "excluded_raw_extracted_partitions": sorted(explicit_raw_images),
-                "unsupported_extracted_partitions": sorted(unsupported_partitions),
+                "padded_logical_images": padding_metadata,
                 "raw_images": [
                     {
                         "file": item.file,
@@ -269,7 +223,6 @@ def build(
                     }
                     for item in staged_raw_images
                 ],
-                "extractor_workers": _resolved_extractor_workers(options, settings),
                 "converter_workers": _resolved_converter_workers(
                     options, settings, len(selected)
                 ),
@@ -278,17 +231,7 @@ def build(
                 ),
                 "device_assertion_enabled": device_assertion.enabled,
                 "device_assertion_names": device_assertion.device_names,
-                "device_assertion_source": device_assertion.source,
                 "artifact_size_bytes": final_output.stat().st_size,
-                "converter_version": artifacts[0].converter_version
-                if artifacts
-                else "",
-                "brotli_backend": "python-brotli",
-                "brotli_backend_version": artifacts[0].metrics.get(
-                    "brotli_backend_version", ""
-                )
-                if artifacts
-                else "",
                 "partition_metrics": partition_metrics,
                 "total_raw_dat_bytes": sum(
                     artifact.raw_dat_size for artifact in artifacts
@@ -314,33 +257,30 @@ def benchmark(
     }
 
 
-def list_partitions(
-    options: BuildOptions, settings: Settings, resources: ResourcePaths
-) -> list[ListedPartition]:
-    require_host_dependencies()
-    extractor_binary = resolve_payload_dumper_go_binary(
-        resources.payload_extractor,
-        options.payload_dumper_go_binary or settings.payload_dumper_go_binary,
+def _discover_logical_images(rom_dir: Path) -> list[Path]:
+    return sorted(
+        path
+        for path in rom_dir.iterdir()
+        if path.is_file() and path.suffix == ".img"
     )
-    with _workspace(options) as workspace:
-        payload_bin = extract_payload_bin(options.ota_zip, workspace)
-        extracted = run_payload_extractor(
-            extractor=extractor_binary,
-            payload_path=payload_bin,
-            output_dir=workspace / "partitions",
-            workers=_resolved_extractor_workers(options, settings),
-            verbose=settings.verbose,
-            selected_partitions=_extractor_selected_partitions(options),
-        )
-        supported, default_raw, excluded_raw, unsupported = _classify_extracted_partitions(extracted)
-        return [
-            ListedPartition(
-                name=path.stem,
-                supported=path.stem in supported or path.stem in default_raw,
-                status=_list_partition_status(path.stem, supported, default_raw, excluded_raw, unsupported),
-            )
-            for path in extracted
-        ]
+
+
+def _partition_support(extracted: list[Path]) -> tuple[set[str], set[str]]:
+    names = [path.stem for path in extracted]
+    supported: set[str] = set()
+    unsupported: set[str] = set()
+    banned = {"super", "userdata", "metadata"}
+    raw_only_prefixes = ("vbmeta",)
+    raw_only_exact = {"boot", "init_boot", "vendor_boot", "dtbo", "recovery", "lk"}
+
+    for name in names:
+        if name in banned:
+            unsupported.add(name)
+        elif name in raw_only_exact or name.startswith(raw_only_prefixes):
+            unsupported.add(name)
+        else:
+            supported.add(name)
+    return supported, unsupported
 
 
 def _process_partitions(
@@ -466,22 +406,17 @@ def _build_partition_artifact(
 
 
 def _select_partitions(
-    extracted: list[Path],
-    options: BuildOptions,
-    settings: Settings,
-    default_raw_images: set[str],
-    explicit_raw_images: set[str],
-    unsupported_partitions: set[str],
-) -> tuple[list[Path], list[RawImageSpec]]:
+    extracted: list[Path], options: BuildOptions, settings: Settings
+) -> list[Path]:
     available = {path.stem: path for path in extracted}
-    supported, _, _, _ = _classify_extracted_partitions(extracted)
+    supported, unsupported = _partition_support(extracted)
     if options.mode == "manual":
         requested = options.custom_partitions
-        selected = [available[name] for name in requested if name in supported]
-        skipped = [name for name in requested if name not in available or name not in supported]
+        selected = [available[name] for name in requested if name in available]
+        skipped = [name for name in requested if name not in available]
     elif options.mode == "all":
         selected = [available[name] for name in sorted(supported)]
-        skipped = sorted(unsupported_partitions)
+        skipped = sorted(unsupported)
         if skipped:
             LOGGER.warning(
                 "Skipping unsupported partitions in --all mode: %s", ", ".join(skipped)
@@ -492,152 +427,112 @@ def _select_partitions(
         skipped = [name for name in requested if name not in available]
     if not selected:
         raise ValidationError(
-            "None of the requested partitions were found in the OTA payload"
+            "None of the requested partitions were found in the ROM directory"
         )
     if skipped:
-        if options.mode == "manual":
-            LOGGER.warning("Skipping unavailable partitions: %s", ", ".join(skipped))
-        elif options.mode == "template":
-            LOGGER.warning("Skipping unavailable partitions: %s", ", ".join(skipped))
-    raw_images = _selected_raw_images(
-        available,
-        default_raw_images,
-        explicit_raw_images,
-        unsupported_partitions,
-        options.raw_partitions,
-    )
-    return selected, raw_images
+        LOGGER.warning("Skipping unavailable partitions: %s", ", ".join(skipped))
+    return selected
 
 
-def _partition_support(extracted: list[Path]) -> tuple[set[str], set[str]]:
-    logical_supported, default_raw, explicit_raw, denied = _classify_extracted_partitions(extracted)
-    unsupported = set(default_raw)
-    unsupported.update(explicit_raw)
-    unsupported.update(denied)
-    return logical_supported, unsupported
-
-
-def _classify_extracted_partitions(
-    extracted: list[Path],
-) -> tuple[set[str], set[str], set[str], set[str]]:
-    logical_supported: set[str] = set()
-    default_raw: set[str] = set()
-    explicit_raw: set[str] = set()
-    unsupported: set[str] = set()
-
-    for path in extracted:
-        name = path.stem
-        if name in _UNSUPPORTED_PARTITIONS:
-            unsupported.add(name)
-        elif _is_default_raw_partition(name):
-            default_raw.add(name)
-        elif _is_explicit_raw_partition(name):
-            explicit_raw.add(name)
-        else:
-            logical_supported.add(name)
-    return logical_supported, default_raw, explicit_raw, unsupported
-
-
-def _selected_raw_images(
-    available: dict[str, Path],
-    default_raw_images: set[str],
-    explicit_raw_images: set[str],
-    unsupported_partitions: set[str],
-    requested_raw_partitions: list[str],
-) -> list[RawImageSpec]:
-    selected_names = sorted(default_raw_images)
-    skipped_explicit: list[str] = []
-    missing: list[str] = []
-    for name in requested_raw_partitions:
-        if name in default_raw_images or name in explicit_raw_images:
-            if name not in selected_names:
-                selected_names.append(name)
-        elif name in unsupported_partitions:
-            skipped_explicit.append(name)
-        else:
-            missing.append(name)
-
-    if skipped_explicit:
-        LOGGER.warning(
-            "Skipping unsupported raw partitions: %s", ", ".join(sorted(skipped_explicit))
-        )
-    if missing:
-        LOGGER.warning(
-            "Skipping unavailable raw partitions: %s", ", ".join(sorted(missing))
-        )
-
-    raw_images: list[RawImageSpec] = []
-    for name in selected_names:
-        raw_spec = _raw_image_spec_for_path(available[name], source="default")
-        if name in requested_raw_partitions:
-            raw_spec.source = "explicit"
-        raw_images.append(raw_spec)
+def _resolve_raw_images(rom_dir: Path, raw_images: list[RawImageSpec]) -> list[RawImageSpec]:
+    for raw_image in raw_images:
+        source_path = rom_dir / raw_image.file
+        if not source_path.exists():
+            raise ValidationError(f"Missing raw image referenced by manifest: {source_path}")
+        if not source_path.is_file():
+            raise ValidationError(f"Raw image path is not a file: {source_path}")
     return raw_images
 
 
-def _extractor_selected_partitions(options: BuildOptions) -> list[str] | None:
-    if options.mode != "manual":
-        return None
-    selected = sorted(
-        set(options.custom_partitions)
-        | _DEFAULT_RAW_PARTITIONS
-        | set(options.raw_partitions)
-    )
-    return selected or None
+def _effective_raw_images(rom_dir: Path, manifest) -> list[RawImageSpec]:
+    if manifest.raw_images:
+        return manifest.raw_images
+    return _autodetect_raw_images(rom_dir)
 
 
-def _is_default_raw_partition(name: str) -> bool:
-    return name in _DEFAULT_RAW_PARTITIONS
+def _autodetect_raw_images(rom_dir: Path) -> list[RawImageSpec]:
+    definitions = [
+        ("logo.bin", "/dev/block/by-name/logo", "none"),
+        ("lk.img", "/dev/block/by-name/lk", "active"),
+        ("boot.img", "/dev/block/by-name/boot", "active"),
+        ("init_boot.img", "/dev/block/by-name/init_boot", "active"),
+        ("vendor_boot.img", "/dev/block/by-name/vendor_boot", "active"),
+        ("dtbo.img", "/dev/block/by-name/dtbo", "active"),
+        ("recovery.img", "/dev/block/by-name/recovery", "active"),
+        ("vbmeta.img", "/dev/block/by-name/vbmeta", "active"),
+        ("vbmeta_system.img", "/dev/block/by-name/vbmeta_system", "active"),
+        ("vbmeta_vendor.img", "/dev/block/by-name/vbmeta_vendor", "active"),
+    ]
+    detected: list[RawImageSpec] = []
+    for file_name, target, slot_policy in definitions:
+        if (rom_dir / file_name).is_file():
+            detected.append(
+                RawImageSpec(
+                    file=file_name,
+                    target=target,
+                    slot_policy=slot_policy,
+                    source="autodetect",
+                )
+            )
+    return detected
 
 
-def _is_explicit_raw_partition(name: str) -> bool:
-    return name in _EXPLICIT_RAW_PARTITIONS or name.startswith(_EXPLICIT_RAW_PREFIXES)
+def _stage_logical_images(
+    rom_dir: Path,
+    destination_dir: Path,
+    selected: list[Path],
+) -> tuple[list[Path], list[dict[str, int | str]]]:
+    _ = rom_dir
+    staged: list[Path] = []
+    padded: list[dict[str, int | str]] = []
+    blocksize = 4096
+
+    for source_path in selected:
+        destination = destination_dir / source_path.name
+        shutil.copy2(source_path, destination)
+        original_size = destination.stat().st_size
+        remainder = original_size % blocksize
+        if remainder:
+            padding_bytes = blocksize - remainder
+            with destination.open("ab") as handle:
+                handle.write(b"\0" * padding_bytes)
+            padded_size = original_size + padding_bytes
+            LOGGER.info(
+                "Padding staged logical image %s by %d bytes to reach %d-byte alignment",
+                source_path.name,
+                padding_bytes,
+                blocksize,
+            )
+            padded.append(
+                {
+                    "partition": source_path.stem,
+                    "original_size": original_size,
+                    "padded_size": padded_size,
+                    "padding_bytes": padding_bytes,
+                }
+            )
+        staged.append(destination)
+    return staged, padded
 
 
-def _raw_image_spec_for_path(path: Path, source: str) -> RawImageSpec:
-    name = path.stem
-    if name == "logo":
-        return RawImageSpec(
-            file=path.name,
-            target="/dev/block/by-name/logo",
-            slot_policy="none",
-            source=source,
-        )
-    return RawImageSpec(
-        file=path.name,
-        target=f"/dev/block/by-name/{name}",
-        slot_policy="active",
-        source=source,
-    )
-
-
-def _stage_raw_images(stage_output_dir: Path, raw_images: list[RawImageSpec]) -> list[RawImageSpec]:
+def _stage_raw_images(
+    rom_dir: Path, stage_output_dir: Path, raw_images: list[RawImageSpec]
+) -> list[RawImageSpec]:
     staged: list[RawImageSpec] = []
     for raw_image in raw_images:
-        source_path = stage_output_dir.parent / "partitions" / raw_image.file
-        if not source_path.exists():
-            raise ValidationError(f"Missing extracted raw image: {source_path.name}")
         destination = stage_output_dir / raw_image.file
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_path, destination)
+        shutil.copy2(rom_dir / raw_image.file, destination)
         staged.append(raw_image)
     return staged
 
 
-def _list_partition_status(
-    name: str,
-    supported: set[str],
-    default_raw: set[str],
-    excluded_raw: set[str],
-    unsupported: set[str],
-) -> str:
-    if name in supported or name in default_raw:
-        return "supported"
-    if name in excluded_raw:
-        return "excluded-by-default"
-    if name in unsupported:
-        return "unsupported"
-    return "unsupported"
+def _manifest_device_assertion(manifest) -> DeviceAssertion:
+    return DeviceAssertion(
+        device_names=sorted(set(manifest.assert_devices)),
+        source="port2recovery.toml",
+        enabled=bool(manifest.assert_devices),
+    )
 
 
 class _workspace:
@@ -651,7 +546,7 @@ class _workspace:
             self.path = self.options.work_dir
             self.path.mkdir(parents=True, exist_ok=True)
             return self.path
-        self._tempdir = tempfile.TemporaryDirectory(prefix="payload2recovery-")
+        self._tempdir = tempfile.TemporaryDirectory(prefix="port2recovery-")
         self.path = Path(self._tempdir.name)
         return self.path
 
@@ -663,14 +558,6 @@ class _workspace:
             self._tempdir.cleanup()
         elif self.path and self.path.exists():
             shutil.rmtree(self.path, ignore_errors=True)
-
-
-def _resolved_extractor_workers(options: BuildOptions, settings: Settings) -> int:
-    if options.extractor_workers > 0:
-        return options.extractor_workers
-    if options.payload_threads > 0:
-        return options.payload_threads
-    return settings.resolved_extractor_workers()
 
 
 def _resolved_converter_workers(
@@ -693,12 +580,11 @@ def _resolved_brotli_workers(
     return settings.resolved_brotli_workers(partition_count)
 
 
-def _output_name(options: BuildOptions, settings: Settings) -> str:
+def _output_name(options: BuildOptions) -> str:
     if options.output_name:
         name = options.output_name
     else:
-        base = options.ota_zip.stem.removesuffix("_ota").removeprefix("ota_")
-        name = f"{base}-recovery.zip"
+        name = f"{options.rom_dir.name}-recovery.zip"
     return name if name.endswith(".zip") else f"{name}.zip"
 
 
@@ -707,7 +593,7 @@ def _write_benchmark_report(
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "ota_zip": str(options.ota_zip),
+        "rom_dir": str(options.rom_dir),
         "output_path": str(result.output_path),
         "stage_timings": result.stage_timings,
         "metadata": result.build_metadata,

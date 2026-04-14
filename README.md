@@ -6,6 +6,8 @@ It is built for a narrow recovery workflow on Linux. It extracts partitions from
 
 This is not a stock OTA client and not a general A/B updater replacement. It is a repackaging tool for users who specifically want a recovery ZIP.
 
+The repo also includes `port2recovery`, which converts a directory of extracted port ROM images into the same kind of recovery ZIP. It reuses the current conversion and packaging flow for logical partitions and adds manifest-driven raw image flashing for files such as `logo.bin`, `lk.img`, `vendor_boot.img`, and `vbmeta*.img`.
+
 ## Features
 
 - Extract partitions from `payload.bin` using `payload-dumper-go`

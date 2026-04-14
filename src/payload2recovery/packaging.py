@@ -7,7 +7,15 @@ from typing import Callable
 import zipfile
 
 from payload2recovery.errors import UnsupportedLayoutError
-from payload2recovery.models import DeviceAssertion, PartitionArtifact
+from payload2recovery.models import DeviceAssertion, PartitionArtifact, RawImageSpec
+
+
+def discover_banner_lines(input_root: Path) -> list[str] | None:
+    for name in ("banner", "banner.txt"):
+        candidate = input_root / name
+        if candidate.is_file():
+            return candidate.read_text().splitlines()
+    return None
 
 
 def calculate_group_table_size(sizes: list[int]) -> int:
@@ -61,40 +69,20 @@ def write_dynamic_partitions_op_list(
 def write_updater_script(
     destination: Path,
     partitions: list[PartitionArtifact],
+    raw_images: list[RawImageSpec] | None = None,
     device_assertion: DeviceAssertion | None = None,
+    banner_lines: list[str] | None = None,
 ) -> None:
+    raw_images = raw_images or []
     lines = [
-        'ui_print("Checking /cache...");',
         'run_program("/sbin/sh", "-c", "[ -d /data/cache ] || mkdir -p /data/cache");',
         "",
     ]
+    if banner_lines:
+        lines.extend(_banner_ui_print_lines(banner_lines))
     if device_assertion and device_assertion.enabled and device_assertion.device_names:
-        checks = " || ".join(
-            [
-                f'getprop("ro.product.device") == "{name}"'
-                for name in device_assertion.device_names
-            ]
-            + [
-                f'getprop("ro.build.product") == "{name}"'
-                for name in device_assertion.device_names
-            ]
-            + [
-                f'getprop("ro.product.vendor.device") == "{name}"'
-                for name in device_assertion.device_names
-            ]
-        )
-        expected = ", ".join(device_assertion.device_names)
-        lines.extend(
-            [
-                'ui_print("Checking target device...");',
-                (
-                    f'assert({checks} || '
-                    f'abort("E1000: This package is for device(s): {expected}; this device is " '
-                    '|| getprop("ro.product.device") || "."));'
-                ),
-                "",
-            ]
-        )
+        lines.extend(_device_assertion_lines(device_assertion))
+    lines.extend(_raw_image_updater_lines(raw_images))
     lines.append('assert(update_dynamic_partitions(package_extract_file("dynamic_partitions_op_list")));')
     for partition in partitions:
         lines.extend(
@@ -111,6 +99,68 @@ def write_updater_script(
         )
     lines.extend(["", 'ui_print("Installation complete!");'])
     destination.write_text("\n".join(lines) + "\n")
+
+
+def _device_assertion_lines(device_assertion: DeviceAssertion) -> list[str]:
+    checks = " || ".join(
+        [f'getprop("ro.product.device") == "{name}"' for name in device_assertion.device_names]
+        + [f'getprop("ro.build.product") == "{name}"' for name in device_assertion.device_names]
+        + [f'getprop("ro.product.vendor.device") == "{name}"' for name in device_assertion.device_names]
+    )
+    expected = ", ".join(device_assertion.device_names)
+    return [
+        'ui_print("Checking target device...");',
+        (
+            f'assert({checks} || '
+            f'abort("E1000: This package is for device(s): {expected}; this device is " '
+            '|| getprop("ro.product.device") || "."));'
+        ),
+        "",
+    ]
+
+
+def _raw_image_updater_lines(raw_images: list[RawImageSpec]) -> list[str]:
+    lines: list[str] = []
+    active_slot_raw_images = [item for item in raw_images if item.slot_policy == "active"]
+    if active_slot_raw_images:
+        lines.extend(
+            [
+                'ui_print("Checking active slot...");',
+                (
+                    'assert(getprop("ro.boot.slot_suffix") == "_a" || '
+                    'getprop("ro.boot.slot_suffix") == "_b" || '
+                    'abort("E1002: Unsupported slot suffix: " || getprop("ro.boot.slot_suffix") || "."));'
+                ),
+                "",
+            ]
+        )
+
+    if raw_images:
+        lines.append('ui_print("Flashing raw images...");')
+        for raw_image in raw_images:
+            if raw_image.slot_policy == "active":
+                lines.append(
+                    f'ifelse(getprop("ro.boot.slot_suffix") == "_a", '
+                    f'package_extract_file("{raw_image.file}", "{raw_image.target}_a"), '
+                    f'package_extract_file("{raw_image.file}", "{raw_image.target}_b"));'
+                )
+            else:
+                lines.append(f'package_extract_file("{raw_image.file}", "{raw_image.target}");')
+        lines.extend(["", 'ui_print("Updating dynamic partitions...");'])
+    return lines
+
+
+def _banner_ui_print_lines(banner_lines: list[str]) -> list[str]:
+    lines: list[str] = ['ui_print(" ");', 'ui_print(" ");']
+    for banner_line in banner_lines:
+        display_line = banner_line if banner_line else " "
+        lines.append(f'ui_print("{_escape_edify_string(display_line)}");')
+    lines.extend(['ui_print(" ");', 'ui_print(" ");', ""])
+    return lines
+
+
+def _escape_edify_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def build_flashable_zip(

@@ -6,12 +6,13 @@ import logging
 from pathlib import Path
 import sys
 
-from payload2recovery.config import load_settings
 from payload2recovery.errors import Payload2RecoveryError
 from payload2recovery.logging import configure_logging
-from payload2recovery.models import BuildOptions
-from payload2recovery.pipeline import benchmark, build, doctor, inspect_ota, list_partitions
-from payload2recovery.resources import ResourceManager
+
+from port2recovery.config import load_settings
+from port2recovery.models import BuildOptions
+from port2recovery.pipeline import benchmark, build, doctor, inspect_rom, list_partitions
+from port2recovery.resources import ResourceManager
 
 
 LOGGER = logging.getLogger(__name__)
@@ -27,23 +28,20 @@ def main(argv: list[str] | None = None) -> int:
     try:
         resource_paths = resources.open()
         settings = load_settings(Path("config"), resource_paths.default_partitions)
-        if settings.payload_dumper_go_binary is None:
-            settings.payload_dumper_go_binary = resource_paths.payload_extractor
         settings.verbose = True
         if getattr(args, "command", None) == "doctor":
             info = doctor(settings)
             print(json.dumps(info, indent=2, sort_keys=True))
             return 0
         if args.command == "inspect":
-            info = inspect_ota(args.ota_zip)
-            print(f"OTA: {info['ota_zip']}")
-            print(f"Size: {info['size']} bytes")
+            info = inspect_rom(args.rom_dir, settings)
+            print(json.dumps(info, indent=2, sort_keys=True))
             return 0
 
         options = _options_from_args(args, settings)
         if args.command == "list-partitions":
-            for partition in list_partitions(options, settings, resource_paths):
-                print(f"{partition.name} [{partition.status}]")
+            for partition in list_partitions(options, settings):
+                print(f"{partition.name} [{'supported' if partition.supported else 'unsupported'}]")
             return 0
         if args.command == "build":
             result = build(options, settings, resource_paths)
@@ -75,19 +73,19 @@ def _normalize_argv(argv: list[str] | None) -> list[str] | None:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="payload2recovery",
-        description="Repackage Android OTA payloads into custom-recovery flashable ZIPs.",
+        prog="port2recovery",
+        description="Repackage a port ROM directory into a custom-recovery flashable ZIP.",
     )
     subparsers = parser.add_subparsers(dest="command")
 
     doctor_parser = subparsers.add_parser("doctor", help="Check host dependencies")
     doctor_parser.add_argument("-v", "--verbose", action="store_true", help="Ignored; verbose logging is the default")
 
-    inspect_parser = subparsers.add_parser("inspect", help="Inspect an OTA input")
-    inspect_parser.add_argument("ota_zip", type=Path)
+    inspect_parser = subparsers.add_parser("inspect", help="Inspect a port ROM directory")
+    inspect_parser.add_argument("rom_dir", type=Path)
     inspect_parser.add_argument("-v", "--verbose", action="store_true", help="Ignored; verbose logging is the default")
 
-    list_parser = subparsers.add_parser("list-partitions", help="Extract and list available partitions")
+    list_parser = subparsers.add_parser("list-partitions", help="List partition images in the ROM directory")
     _add_common_build_args(list_parser)
 
     build_parser = subparsers.add_parser("build", help="Generate a recovery-flashable ZIP")
@@ -108,7 +106,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def _add_build_output_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--output-name",
-        help="Final ZIP filename. Defaults to <ota>_recovery.zip",
+        help="Final ZIP filename. Defaults to <rom_dir>_recovery.zip",
     )
     parser.add_argument(
         "--keep-temp",
@@ -123,17 +121,17 @@ def _add_build_output_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        help="Directory for final ZIP artifacts. Defaults to ./output next to the OTA",
+        help="Directory for final ZIP artifacts. Defaults to ./output inside the ROM directory",
     )
 
 
 def _add_common_build_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("ota_zip", type=Path, help="Input OTA ZIP containing payload.bin")
+    parser.add_argument("rom_dir", type=Path, help="Input directory containing ROM images")
     selection_group = parser.add_mutually_exclusive_group()
     selection_group.add_argument(
         "--all",
         action="store_true",
-        help="Use all extracted partitions supported by the current package generator.",
+        help="Use all discovered partitions supported by the current package generator.",
     )
     selection_group.add_argument(
         "-p",
@@ -143,18 +141,6 @@ def _add_common_build_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("-b", "--brotli-level", type=int, default=None, help="Brotli level 0-11")
     parser.add_argument("-z", "--zip-level", type=int, default=None, help="ZIP level 0-9")
-    parser.add_argument(
-        "--payload-threads",
-        type=int,
-        default=0,
-        help="Threads passed to the payload extractor backend",
-    )
-    parser.add_argument(
-        "--extractor-workers",
-        type=int,
-        default=0,
-        help="Extractor worker count for backends that support it",
-    )
     parser.add_argument(
         "--converter-workers",
         type=int,
@@ -174,12 +160,6 @@ def _add_common_build_args(parser: argparse.ArgumentParser) -> None:
         default=0,
         help="Alias for --converter-workers",
     )
-    parser.add_argument(
-        "--payload-dumper-go-binary",
-        type=Path,
-        default=None,
-        help="Path to an external payload-dumper-go binary",
-    )
     parser.add_argument("--group-table", default=None, help="Dynamic partition group name")
     parser.add_argument(
         "--group-table-size",
@@ -192,12 +172,6 @@ def _add_common_build_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Skip brotli compression and keep *.new.dat.br as a renamed dat file",
     )
-    parser.add_argument(
-        "--raw-partitions",
-        nargs="+",
-        default=[],
-        help="Explicit raw partitions to include, such as vendor_boot or vbmeta.",
-    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Ignored; verbose logging is the default")
 
 
@@ -206,19 +180,15 @@ def _options_from_args(args: argparse.Namespace, settings) -> BuildOptions:
     mode = "all" if getattr(args, "all", False) else "manual" if partitions else "template"
     converter_workers = args.converter_workers or args.workers
     return BuildOptions(
-        ota_zip=args.ota_zip,
+        rom_dir=args.rom_dir,
         mode=mode,
         custom_partitions=partitions,
-        raw_partitions=args.raw_partitions or [],
         brotli_level=args.brotli_level if args.brotli_level is not None else settings.brotli_level,
         zip_level=args.zip_level if args.zip_level is not None else settings.zip_level,
-        payload_threads=args.payload_threads,
-        extractor_workers=args.extractor_workers,
         converter_workers=converter_workers,
         brotli_workers=args.brotli_workers,
         workers=args.workers,
-        payload_dumper_go_binary=args.payload_dumper_go_binary or settings.payload_dumper_go_binary,
-        group_table=args.group_table or settings.group_table,
+        group_table=args.group_table,
         group_table_size=args.group_table_size,
         no_brotli=args.no_brotli,
         keep_temp=getattr(args, "keep_temp", False),

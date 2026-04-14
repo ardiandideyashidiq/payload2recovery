@@ -8,6 +8,7 @@ from pathlib import Path
 class ListedPartition:
     name: str
     supported: bool
+    status: str = "supported"
 
 
 @dataclass(slots=True)
@@ -18,10 +19,19 @@ class DeviceAssertion:
 
 
 @dataclass(slots=True)
+class RawImageSpec:
+    file: str
+    target: str
+    slot_policy: str = "none"
+    source: str = ""
+
+
+@dataclass(slots=True)
 class BuildOptions:
     ota_zip: Path
     mode: str
     custom_partitions: list[str] = field(default_factory=list)
+    raw_partitions: list[str] = field(default_factory=list)
     brotli_level: int = 6
     zip_level: int = 6
     payload_threads: int = 0
