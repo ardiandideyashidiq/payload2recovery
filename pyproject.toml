@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "payload2recovery"
-version = "1.0.0"
+version = "1.1.0"
 description = "Repackage Android OTA payloads into custom-recovery flashable ZIPs"
 readme = "README.md"
 requires-python = ">=3.11"
