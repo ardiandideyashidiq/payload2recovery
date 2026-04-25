@@ -89,13 +89,10 @@ def detect_device_assertion(ota_zip: Path) -> DeviceAssertion:
                 key = key.strip()
                 value = value.strip()
                 if key == "pre-device" and value:
-                    candidates.add(value)
+                    candidates.update(
+                        device.strip() for device in value.split(",") if device.strip()
+                    )
                     source = metadata_name
-                elif key == "post-build" and value:
-                    parts = value.split("/")
-                    if len(parts) >= 2 and parts[1]:
-                        candidates.add(parts[1])
-                        source = metadata_name
     return DeviceAssertion(
         device_names=sorted(candidates),
         source=source,

@@ -59,12 +59,13 @@ def test_detect_device_assertion_from_metadata(tmp_path: Path) -> None:
     with zipfile.ZipFile(ota_zip, "w") as archive:
         archive.writestr(
             "META-INF/com/android/metadata",
-            "ota-type=AB\npre-device=P661N\npost-build=Itel/P661N-GL/itel-P661N:12/build\n",
+            "ota-type=AB\npre-device=P661N,P661N-GL\npost-build=google/blazer_beta/blazer:17/build\n",
         )
     assertion = detect_device_assertion(ota_zip)
     assert assertion.enabled is True
     assert "P661N" in assertion.device_names
     assert "P661N-GL" in assertion.device_names
+    assert "blazer_beta" not in assertion.device_names
 
 
 def test_partition_support_marks_raw_boot_artifacts_unsupported(tmp_path: Path) -> None:
