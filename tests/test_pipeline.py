@@ -88,15 +88,31 @@ def test_classify_extracted_partitions_separates_default_and_explicit_raw(tmp_pa
         tmp_path / "system.img",
         tmp_path / "logo.bin",
         tmp_path / "lk.img",
+        tmp_path / "boot.img",
         tmp_path / "vendor_boot.img",
         tmp_path / "vbmeta.img",
         tmp_path / "super.img",
     ]
     supported, default_raw, explicit_raw, unsupported = _classify_extracted_partitions(extracted)
     assert supported == {"system"}
-    assert default_raw == {"logo", "lk"}
-    assert explicit_raw == {"vendor_boot", "vbmeta"}
+    assert default_raw == {"logo", "lk", "boot", "vbmeta"}
+    assert explicit_raw == {"vendor_boot"}
     assert unsupported == {"super"}
+
+
+def test_classify_extracted_partitions_keeps_boot_explicit_without_vendor_boot(
+    tmp_path: Path,
+) -> None:
+    extracted = [
+        tmp_path / "system.img",
+        tmp_path / "boot.img",
+        tmp_path / "vbmeta.img",
+    ]
+    supported, default_raw, explicit_raw, unsupported = _classify_extracted_partitions(extracted)
+    assert supported == {"system"}
+    assert default_raw == {"vbmeta"}
+    assert explicit_raw == {"boot"}
+    assert unsupported == set()
 
 
 def test_output_name_keeps_full_long_ota_stem() -> None:
@@ -179,10 +195,28 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
         selected_partitions=None,
     ) -> list[Path]:
         _ = extractor, payload_path, workers, verbose
-        assert selected_partitions == ["lk", "logo", "system", "vendor_boot"]
+        assert selected_partitions == [
+            "boot",
+            "lk",
+            "logo",
+            "system",
+            "vbmeta",
+            "vbmeta_system",
+            "vbmeta_vendor",
+            "vendor_boot",
+        ]
         output_dir.mkdir(parents=True, exist_ok=True)
         created: list[Path] = []
-        for name in ("system.img", "logo.bin", "lk.img", "vendor_boot.img"):
+        for name in (
+            "system.img",
+            "logo.bin",
+            "lk.img",
+            "boot.img",
+            "vendor_boot.img",
+            "vbmeta.img",
+            "vbmeta_system.img",
+            "vbmeta_vendor.img",
+        ):
             path = output_dir / name
             path.write_bytes(name.encode())
             created.append(path)
@@ -263,15 +297,26 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
 
     with zipfile.ZipFile(result.output_path) as archive:
         names = set(archive.namelist())
+        assert "boot.img" in names
         assert "logo.bin" in names
         assert "lk.img" in names
+        assert "vbmeta.img" in names
+        assert "vbmeta_system.img" in names
+        assert "vbmeta_vendor.img" in names
         assert "vendor_boot.img" in names
         assert "system.transfer.list" in names
         updater_script = archive.read("META-INF/com/google/android/updater-script").decode()
     assert 'package_extract_file("logo.bin", "/dev/block/by-name/logo");' in updater_script
     assert 'package_extract_file("lk.img", "/dev/block/by-name/lk_a")' in updater_script
+    assert 'package_extract_file("boot.img", "/dev/block/by-name/boot_a")' in updater_script
     assert 'package_extract_file("vendor_boot.img", "/dev/block/by-name/vendor_boot_a")' in updater_script
     assert result.build_metadata["raw_images"] == [
+        {
+            "file": "boot.img",
+            "target": "/dev/block/by-name/boot",
+            "slot_policy": "active",
+            "source": "default",
+        },
         {
             "file": "lk.img",
             "target": "/dev/block/by-name/lk",
@@ -282,6 +327,24 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
             "file": "logo.bin",
             "target": "/dev/block/by-name/logo",
             "slot_policy": "none",
+            "source": "default",
+        },
+        {
+            "file": "vbmeta.img",
+            "target": "/dev/block/by-name/vbmeta",
+            "slot_policy": "active",
+            "source": "default",
+        },
+        {
+            "file": "vbmeta_system.img",
+            "target": "/dev/block/by-name/vbmeta_system",
+            "slot_policy": "active",
+            "source": "default",
+        },
+        {
+            "file": "vbmeta_vendor.img",
+            "target": "/dev/block/by-name/vbmeta_vendor",
+            "slot_policy": "active",
             "source": "default",
         },
         {

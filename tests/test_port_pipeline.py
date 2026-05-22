@@ -238,6 +238,7 @@ def test_inspect_rom_autodetects_common_raw_images_without_manifest(tmp_path: Pa
     (rom_dir / "system.img").write_bytes(b"system")
     (rom_dir / "logo.bin").write_bytes(b"logo")
     (rom_dir / "lk.img").write_bytes(b"lk")
+    (rom_dir / "boot.img").write_bytes(b"boot")
     (rom_dir / "vendor_boot.img").write_bytes(b"vb")
     (rom_dir / "vbmeta.img").write_bytes(b"meta")
 
@@ -260,6 +261,13 @@ def test_inspect_rom_autodetects_common_raw_images_without_manifest(tmp_path: Pa
             "exists": True,
         },
         {
+            "file": "boot.img",
+            "target": "/dev/block/by-name/boot",
+            "slot_policy": "active",
+            "source": "autodetect",
+            "exists": True,
+        },
+        {
             "file": "vendor_boot.img",
             "target": "/dev/block/by-name/vendor_boot",
             "slot_policy": "active",
@@ -276,6 +284,19 @@ def test_inspect_rom_autodetects_common_raw_images_without_manifest(tmp_path: Pa
     ]
 
 
+def test_inspect_rom_does_not_autodetect_boot_without_vendor_boot(tmp_path: Path) -> None:
+    rom_dir = tmp_path / "hyperos"
+    rom_dir.mkdir()
+    (rom_dir / "system.img").write_bytes(b"system")
+    (rom_dir / "boot.img").write_bytes(b"boot")
+    (rom_dir / "vbmeta.img").write_bytes(b"meta")
+
+    info = pipeline.inspect_rom(rom_dir, Settings(default_partitions=["system"]))
+
+    assert info["manifest_present"] is False
+    assert [item["file"] for item in info["raw_images"]] == ["vbmeta.img"]
+
+
 def test_build_autodetects_raw_images_when_manifest_has_no_raw_entries(tmp_path: Path, monkeypatch) -> None:
     rom_dir = tmp_path / "hyperos"
     rom_dir.mkdir()
@@ -283,6 +304,7 @@ def test_build_autodetects_raw_images_when_manifest_has_no_raw_entries(tmp_path:
     (rom_dir / "vendor.img").write_bytes(b"vendor-image")
     (rom_dir / "logo.bin").write_bytes(b"logo")
     (rom_dir / "lk.img").write_bytes(b"lk")
+    (rom_dir / "boot.img").write_bytes(b"boot")
     (rom_dir / "vendor_boot.img").write_bytes(b"vb")
     (rom_dir / "vbmeta.img").write_bytes(b"meta")
 
@@ -337,6 +359,7 @@ def test_build_autodetects_raw_images_when_manifest_has_no_raw_entries(tmp_path:
 
     with zipfile.ZipFile(result.output_path) as archive:
         names = set(archive.namelist())
+        assert "boot.img" in names
         assert "logo.bin" in names
         assert "lk.img" in names
         assert "vendor_boot.img" in names
@@ -352,6 +375,12 @@ def test_build_autodetects_raw_images_when_manifest_has_no_raw_entries(tmp_path:
         {
             "file": "lk.img",
             "target": "/dev/block/by-name/lk",
+            "slot_policy": "active",
+            "source": "autodetect",
+        },
+        {
+            "file": "boot.img",
+            "target": "/dev/block/by-name/boot",
             "slot_policy": "active",
             "source": "autodetect",
         },

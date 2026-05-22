@@ -451,18 +451,24 @@ def _effective_raw_images(rom_dir: Path, manifest) -> list[RawImageSpec]:
 
 
 def _autodetect_raw_images(rom_dir: Path) -> list[RawImageSpec]:
+    has_vendor_boot = (rom_dir / "vendor_boot.img").is_file()
     definitions = [
         ("logo.bin", "/dev/block/by-name/logo", "none"),
         ("lk.img", "/dev/block/by-name/lk", "active"),
-        ("boot.img", "/dev/block/by-name/boot", "active"),
-        ("init_boot.img", "/dev/block/by-name/init_boot", "active"),
-        ("vendor_boot.img", "/dev/block/by-name/vendor_boot", "active"),
-        ("dtbo.img", "/dev/block/by-name/dtbo", "active"),
-        ("recovery.img", "/dev/block/by-name/recovery", "active"),
-        ("vbmeta.img", "/dev/block/by-name/vbmeta", "active"),
-        ("vbmeta_system.img", "/dev/block/by-name/vbmeta_system", "active"),
-        ("vbmeta_vendor.img", "/dev/block/by-name/vbmeta_vendor", "active"),
     ]
+    if has_vendor_boot:
+        definitions.append(("boot.img", "/dev/block/by-name/boot", "active"))
+    definitions.extend(
+        [
+            ("init_boot.img", "/dev/block/by-name/init_boot", "active"),
+            ("vendor_boot.img", "/dev/block/by-name/vendor_boot", "active"),
+            ("dtbo.img", "/dev/block/by-name/dtbo", "active"),
+            ("recovery.img", "/dev/block/by-name/recovery", "active"),
+            ("vbmeta.img", "/dev/block/by-name/vbmeta", "active"),
+            ("vbmeta_system.img", "/dev/block/by-name/vbmeta_system", "active"),
+            ("vbmeta_vendor.img", "/dev/block/by-name/vbmeta_vendor", "active"),
+        ]
+    )
     detected: list[RawImageSpec] = []
     for file_name, target, slot_policy in definitions:
         if (rom_dir / file_name).is_file():

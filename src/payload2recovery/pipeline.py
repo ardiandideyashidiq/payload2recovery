@@ -46,9 +46,17 @@ from payload2recovery.resources import ResourcePaths
 LOGGER = logging.getLogger(__name__)
 
 _UNSUPPORTED_PARTITIONS = {"super", "userdata", "metadata"}
-_DEFAULT_RAW_PARTITIONS = {"logo", "lk"}
+_ALWAYS_DEFAULT_RAW_PARTITIONS = {"logo", "lk"}
+_CONDITIONAL_DEFAULT_RAW_PARTITIONS = {"boot"}
 _EXPLICIT_RAW_PARTITIONS = {"boot", "init_boot", "vendor_boot", "dtbo", "recovery"}
 _EXPLICIT_RAW_PREFIXES = ("vbmeta",)
+_DEFAULT_RAW_PROBES = {
+    "boot",
+    "vendor_boot",
+    "vbmeta",
+    "vbmeta_system",
+    "vbmeta_vendor",
+}
 
 
 def doctor(settings: Settings | None = None) -> dict[str, object]:
@@ -517,6 +525,7 @@ def _partition_support(extracted: list[Path]) -> tuple[set[str], set[str]]:
 def _classify_extracted_partitions(
     extracted: list[Path],
 ) -> tuple[set[str], set[str], set[str], set[str]]:
+    extracted_names = {path.stem for path in extracted}
     logical_supported: set[str] = set()
     default_raw: set[str] = set()
     explicit_raw: set[str] = set()
@@ -526,7 +535,7 @@ def _classify_extracted_partitions(
         name = path.stem
         if name in _UNSUPPORTED_PARTITIONS:
             unsupported.add(name)
-        elif _is_default_raw_partition(name):
+        elif _is_default_raw_partition(name, extracted_names):
             default_raw.add(name)
         elif _is_explicit_raw_partition(name):
             explicit_raw.add(name)
@@ -577,14 +586,19 @@ def _extractor_selected_partitions(options: BuildOptions) -> list[str] | None:
         return None
     selected = sorted(
         set(options.custom_partitions)
-        | _DEFAULT_RAW_PARTITIONS
+        | _ALWAYS_DEFAULT_RAW_PARTITIONS
+        | _DEFAULT_RAW_PROBES
         | set(options.raw_partitions)
     )
     return selected or None
 
 
-def _is_default_raw_partition(name: str) -> bool:
-    return name in _DEFAULT_RAW_PARTITIONS
+def _is_default_raw_partition(name: str, extracted_names: set[str]) -> bool:
+    if name in _ALWAYS_DEFAULT_RAW_PARTITIONS:
+        return True
+    if name in _CONDITIONAL_DEFAULT_RAW_PARTITIONS and "vendor_boot" in extracted_names:
+        return True
+    return name.startswith("vbmeta")
 
 
 def _is_explicit_raw_partition(name: str) -> bool:
