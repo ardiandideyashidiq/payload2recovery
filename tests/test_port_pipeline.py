@@ -274,13 +274,6 @@ def test_inspect_rom_autodetects_common_raw_images_without_manifest(tmp_path: Pa
             "source": "autodetect",
             "exists": True,
         },
-        {
-            "file": "vbmeta.img",
-            "target": "/dev/block/by-name/vbmeta",
-            "slot_policy": "active",
-            "source": "autodetect",
-            "exists": True,
-        },
     ]
 
 
@@ -294,7 +287,7 @@ def test_inspect_rom_does_not_autodetect_boot_without_vendor_boot(tmp_path: Path
     info = pipeline.inspect_rom(rom_dir, Settings(default_partitions=["system"]))
 
     assert info["manifest_present"] is False
-    assert [item["file"] for item in info["raw_images"]] == ["vbmeta.img"]
+    assert info["raw_images"] == []
 
 
 def test_build_autodetects_raw_images_when_manifest_has_no_raw_entries(tmp_path: Path, monkeypatch) -> None:
@@ -306,7 +299,6 @@ def test_build_autodetects_raw_images_when_manifest_has_no_raw_entries(tmp_path:
     (rom_dir / "lk.img").write_bytes(b"lk")
     (rom_dir / "boot.img").write_bytes(b"boot")
     (rom_dir / "vendor_boot.img").write_bytes(b"vb")
-    (rom_dir / "vbmeta.img").write_bytes(b"meta")
 
     def fake_benchmark_converter(script_dir: Path, image_path: Path, output_dir: Path, partition: str, stage_callback=None):
         _ = script_dir
@@ -363,7 +355,6 @@ def test_build_autodetects_raw_images_when_manifest_has_no_raw_entries(tmp_path:
         assert "logo.bin" in names
         assert "lk.img" in names
         assert "vendor_boot.img" in names
-        assert "vbmeta.img" in names
 
     assert result.build_metadata["raw_images"] == [
         {
@@ -387,12 +378,6 @@ def test_build_autodetects_raw_images_when_manifest_has_no_raw_entries(tmp_path:
         {
             "file": "vendor_boot.img",
             "target": "/dev/block/by-name/vendor_boot",
-            "slot_policy": "active",
-            "source": "autodetect",
-        },
-        {
-            "file": "vbmeta.img",
-            "target": "/dev/block/by-name/vbmeta",
             "slot_policy": "active",
             "source": "autodetect",
         },

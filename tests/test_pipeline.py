@@ -95,8 +95,8 @@ def test_classify_extracted_partitions_separates_default_and_explicit_raw(tmp_pa
     ]
     supported, default_raw, explicit_raw, unsupported = _classify_extracted_partitions(extracted)
     assert supported == {"system"}
-    assert default_raw == {"logo", "lk", "boot", "vbmeta"}
-    assert explicit_raw == {"vendor_boot"}
+    assert default_raw == {"logo", "lk", "boot"}
+    assert explicit_raw == {"vendor_boot", "vbmeta"}
     assert unsupported == {"super"}
 
 
@@ -110,8 +110,8 @@ def test_classify_extracted_partitions_keeps_boot_explicit_without_vendor_boot(
     ]
     supported, default_raw, explicit_raw, unsupported = _classify_extracted_partitions(extracted)
     assert supported == {"system"}
-    assert default_raw == {"vbmeta"}
-    assert explicit_raw == {"boot"}
+    assert default_raw == set()
+    assert explicit_raw == {"boot", "vbmeta"}
     assert unsupported == set()
 
 
@@ -200,9 +200,6 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
             "lk",
             "logo",
             "system",
-            "vbmeta",
-            "vbmeta_system",
-            "vbmeta_vendor",
             "vendor_boot",
         ]
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -213,9 +210,6 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
             "lk.img",
             "boot.img",
             "vendor_boot.img",
-            "vbmeta.img",
-            "vbmeta_system.img",
-            "vbmeta_vendor.img",
         ):
             path = output_dir / name
             path.write_bytes(name.encode())
@@ -300,9 +294,6 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
         assert "boot.img" in names
         assert "logo.bin" in names
         assert "lk.img" in names
-        assert "vbmeta.img" in names
-        assert "vbmeta_system.img" in names
-        assert "vbmeta_vendor.img" in names
         assert "vendor_boot.img" in names
         assert "system.transfer.list" in names
         updater_script = archive.read("META-INF/com/google/android/updater-script").decode()
@@ -327,24 +318,6 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
             "file": "logo.bin",
             "target": "/dev/block/by-name/logo",
             "slot_policy": "none",
-            "source": "default",
-        },
-        {
-            "file": "vbmeta.img",
-            "target": "/dev/block/by-name/vbmeta",
-            "slot_policy": "active",
-            "source": "default",
-        },
-        {
-            "file": "vbmeta_system.img",
-            "target": "/dev/block/by-name/vbmeta_system",
-            "slot_policy": "active",
-            "source": "default",
-        },
-        {
-            "file": "vbmeta_vendor.img",
-            "target": "/dev/block/by-name/vbmeta_vendor",
-            "slot_policy": "active",
             "source": "default",
         },
         {

@@ -464,9 +464,6 @@ def _autodetect_raw_images(rom_dir: Path) -> list[RawImageSpec]:
             ("vendor_boot.img", "/dev/block/by-name/vendor_boot", "active"),
             ("dtbo.img", "/dev/block/by-name/dtbo", "active"),
             ("recovery.img", "/dev/block/by-name/recovery", "active"),
-            ("vbmeta.img", "/dev/block/by-name/vbmeta", "active"),
-            ("vbmeta_system.img", "/dev/block/by-name/vbmeta_system", "active"),
-            ("vbmeta_vendor.img", "/dev/block/by-name/vbmeta_vendor", "active"),
         ]
     )
     detected: list[RawImageSpec] = []

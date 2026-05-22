@@ -53,9 +53,6 @@ _EXPLICIT_RAW_PREFIXES = ("vbmeta",)
 _DEFAULT_RAW_PROBES = {
     "boot",
     "vendor_boot",
-    "vbmeta",
-    "vbmeta_system",
-    "vbmeta_vendor",
 }
 
 
@@ -598,7 +595,7 @@ def _is_default_raw_partition(name: str, extracted_names: set[str]) -> bool:
         return True
     if name in _CONDITIONAL_DEFAULT_RAW_PARTITIONS and "vendor_boot" in extracted_names:
         return True
-    return name.startswith("vbmeta")
+    return False
 
 
 def _is_explicit_raw_partition(name: str) -> bool:
