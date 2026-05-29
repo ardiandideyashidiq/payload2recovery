@@ -42,6 +42,7 @@ include = [
   "/README.md",
   "/LICENSE",
   "/src/payload2recovery/**/*.py",
+  "/src/payload2recovery/assets/bin/avbctl",
   "/src/payload2recovery/assets/bin/payload-dumper-go",
   "/src/payload2recovery/assets/bin/update-binary",
   "/src/payload2recovery/assets/config/default_partitions.txt",

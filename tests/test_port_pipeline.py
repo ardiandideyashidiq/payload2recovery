@@ -351,6 +351,7 @@ def test_build_autodetects_raw_images_when_manifest_has_no_raw_entries(tmp_path:
 
     with zipfile.ZipFile(result.output_path) as archive:
         names = set(archive.namelist())
+        assert "bin/avbctl" in names
         assert "boot.img" in names
         assert "logo.bin" in names
         assert "lk.img" in names

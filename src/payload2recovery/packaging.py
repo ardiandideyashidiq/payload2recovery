@@ -82,6 +82,7 @@ def write_updater_script(
         lines.extend(_banner_ui_print_lines(banner_lines))
     if device_assertion and device_assertion.enabled and device_assertion.device_names:
         lines.extend(_device_assertion_lines(device_assertion))
+    lines.extend(_avbctl_disable_lines())
     lines.extend(_raw_image_updater_lines(raw_images))
     lines.append('assert(update_dynamic_partitions(package_extract_file("dynamic_partitions_op_list")));')
     for partition in partitions:
@@ -150,6 +151,17 @@ def _raw_image_updater_lines(raw_images: list[RawImageSpec]) -> list[str]:
     return lines
 
 
+def _avbctl_disable_lines() -> list[str]:
+    return [
+        'ui_print("Disabling AVB vbmeta...");',
+        'package_extract_file("bin/avbctl", "/system/bin/avbctl");',
+        'set_perm(0, 0, 0755, "/system/bin/avbctl");',
+        'run_program("/system/bin/avbctl", "--force", "disable-verity");',
+        'run_program("/system/bin/avbctl", "--force", "disable-verification");',
+        "",
+    ]
+
+
 def _banner_ui_print_lines(banner_lines: list[str]) -> list[str]:
     lines: list[str] = ['ui_print(" ");', 'ui_print(" ");']
     for banner_line in banner_lines:
@@ -166,6 +178,7 @@ def _escape_edify_string(value: str) -> str:
 def build_flashable_zip(
     payload_dir: Path,
     update_binary: Path,
+    avbctl_binary: Path,
     output_path: Path,
     zip_level: int,
     progress_callback: Callable[[str, int, int, int, int, bool], None] | None = None,
@@ -174,6 +187,9 @@ def build_flashable_zip(
     meta_dir = payload_dir / "META-INF" / "com" / "google" / "android"
     meta_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(update_binary, meta_dir / "update-binary")
+    avbctl_destination = payload_dir / "bin" / "avbctl"
+    avbctl_destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(avbctl_binary, avbctl_destination)
 
     file_entries = [path for path in sorted(payload_dir.rglob("*")) if path.is_file()]
     total_files = len(file_entries)

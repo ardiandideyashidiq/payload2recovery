@@ -90,6 +90,11 @@ def test_write_updater_script_with_banner_lines(tmp_path: Path) -> None:
     assert 'ui_print("Hello");' in content
     assert 'ui_print(" ");' in content
     assert 'ui_print("Quote \\" and slash \\\\");' in content
+    assert 'package_extract_file("bin/avbctl", "/system/bin/avbctl");' in content
+    assert 'run_program("/system/bin/avbctl", "--force", "disable-verity");' in content
+    assert content.index('package_extract_file("bin/avbctl", "/system/bin/avbctl");') < content.index(
+        'assert(update_dynamic_partitions(package_extract_file("dynamic_partitions_op_list")));'
+    )
 
 
 def test_write_updater_script_includes_raw_images_and_slot_logic(tmp_path: Path) -> None:
@@ -111,6 +116,10 @@ def test_write_updater_script_includes_raw_images_and_slot_logic(tmp_path: Path)
         ],
     )
     content = updater_script.read_text()
+    assert 'package_extract_file("bin/avbctl", "/system/bin/avbctl");' in content
+    assert content.index('package_extract_file("bin/avbctl", "/system/bin/avbctl");') < content.index(
+        'ui_print("Flashing raw images...");'
+    )
     assert 'package_extract_file("logo.bin", "/dev/block/by-name/logo");' in content
     assert 'getprop("ro.boot.slot_suffix") == "_a"' in content
     assert 'package_extract_file("lk.img", "/dev/block/by-name/lk_a")' in content
@@ -135,9 +144,11 @@ def test_build_flashable_zip_creates_output_parent(tmp_path: Path) -> None:
 
     update_binary = tmp_path / "update-binary"
     update_binary.write_bytes(b"binary")
+    avbctl_binary = tmp_path / "avbctl"
+    avbctl_binary.write_bytes(b"binary")
 
     output_zip = tmp_path / "missing" / "nested" / "result.zip"
-    build_flashable_zip(payload_dir, update_binary, output_zip, zip_level=0)
+    build_flashable_zip(payload_dir, update_binary, avbctl_binary, output_zip, zip_level=0)
 
     assert output_zip.exists()
 
@@ -154,12 +165,15 @@ def test_build_flashable_zip_reports_monotonic_progress(tmp_path: Path) -> None:
 
     update_binary = tmp_path / "update-binary"
     update_binary.write_bytes(b"binary")
+    avbctl_binary = tmp_path / "avbctl"
+    avbctl_binary.write_bytes(b"binary")
     output_zip = tmp_path / "result.zip"
     events: list[tuple[str, int, int, int, int, bool]] = []
 
     build_flashable_zip(
         payload_dir,
         update_binary,
+        avbctl_binary,
         output_zip,
         zip_level=6,
         progress_callback=lambda current_file, files_done, total_files, bytes_done, total_bytes, store_entry: events.append(
@@ -187,9 +201,12 @@ def test_build_flashable_zip_stores_brotli_entries(tmp_path: Path) -> None:
 
     update_binary = tmp_path / "update-binary"
     update_binary.write_bytes(b"binary")
+    avbctl_binary = tmp_path / "avbctl"
+    avbctl_binary.write_bytes(b"binary")
     output_zip = tmp_path / "result.zip"
-    build_flashable_zip(payload_dir, update_binary, output_zip, zip_level=6)
+    build_flashable_zip(payload_dir, update_binary, avbctl_binary, output_zip, zip_level=6)
 
     with zipfile.ZipFile(output_zip) as archive:
+        assert archive.getinfo("bin/avbctl").compress_type == zipfile.ZIP_DEFLATED
         assert archive.getinfo("system.new.dat.br").compress_type == zipfile.ZIP_STORED
         assert archive.getinfo("system.transfer.list").compress_type == zipfile.ZIP_DEFLATED

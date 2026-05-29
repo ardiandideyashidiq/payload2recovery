@@ -291,6 +291,7 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
 
     with zipfile.ZipFile(result.output_path) as archive:
         names = set(archive.namelist())
+        assert "bin/avbctl" in names
         assert "boot.img" in names
         assert "logo.bin" in names
         assert "lk.img" in names

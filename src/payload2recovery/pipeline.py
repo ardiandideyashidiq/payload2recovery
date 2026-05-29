@@ -228,6 +228,7 @@ def build(
                 build_flashable_zip(
                     stage_output_dir,
                     resources.update_binary,
+                    resources.avbctl,
                     final_output,
                     options.zip_level,
                     progress_callback=lambda current_file,

@@ -30,6 +30,10 @@ def test_write_updater_script_includes_raw_images_and_slot_logic(tmp_path: Path)
         ),
     )
     content = updater_script.read_text()
+    assert 'package_extract_file("bin/avbctl", "/system/bin/avbctl");' in content
+    assert content.index('package_extract_file("bin/avbctl", "/system/bin/avbctl");') < content.index(
+        'ui_print("Flashing raw images...");'
+    )
     assert 'package_extract_file("logo.bin", "/dev/block/by-name/logo");' in content
     assert 'getprop("ro.boot.slot_suffix") == "_a"' in content
     assert 'package_extract_file("lk.img", "/dev/block/by-name/lk_a")' in content

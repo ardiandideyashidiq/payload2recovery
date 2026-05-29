@@ -47,6 +47,7 @@ uv run pt2r --help
 - Generate `dynamic_partitions_op_list` and `updater-script`
 - Compress `new.dat` payloads with Brotli
 - Add best-effort device assertions from OTA metadata
+- Bundle `avbctl` and disable AVB verity/verification during install
 - Flash raw images such as `logo`, `lk`, and other opt-in boot-side partitions
 - Read optional `banner` / `banner.txt` files and render them through `ui_print(...)`
 

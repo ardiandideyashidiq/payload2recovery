@@ -8,6 +8,7 @@ from pathlib import Path
 
 @dataclass(slots=True)
 class ResourcePaths:
+    avbctl: Path
     payload_extractor: Path
     update_binary: Path
     default_partitions: Path
@@ -20,6 +21,7 @@ class ResourceManager:
 
     def open(self) -> ResourcePaths:
         assets = files("payload2recovery.assets")
+        avbctl = self._stack.enter_context(as_file(assets / "bin" / "avbctl"))
         payload_extractor = self._stack.enter_context(as_file(assets / "bin" / "payload-dumper-go"))
         update_binary = self._stack.enter_context(as_file(assets / "bin" / "update-binary"))
         default_partitions = self._stack.enter_context(
@@ -27,6 +29,7 @@ class ResourceManager:
         )
         scripts_dir = self._stack.enter_context(as_file(assets / "scripts"))
         return ResourcePaths(
+            avbctl=Path(avbctl),
             payload_extractor=Path(payload_extractor),
             update_binary=Path(update_binary),
             default_partitions=Path(default_partitions),
