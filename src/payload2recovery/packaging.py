@@ -155,7 +155,8 @@ def _avbctl_disable_lines() -> list[str]:
     return [
         'ui_print("Disabling AVB vbmeta...");',
         'package_extract_file("bin/avbctl", "/system/bin/avbctl");',
-        'set_metadata("/system/bin/avbctl", "uid", 0, "gid", 0, "mode", 0755, "capabilities", 0x0);',
+        'run_program("/sbin/sh", "-c", "chmod 0755 /system/bin/avbctl");',
+        'run_program("/sbin/sh", "-c", "chown 0:0 /system/bin/avbctl");',
         'run_program("/system/bin/avbctl", "--force", "disable-verity");',
         'run_program("/system/bin/avbctl", "--force", "disable-verification");',
         "",

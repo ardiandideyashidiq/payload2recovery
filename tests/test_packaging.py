@@ -91,7 +91,8 @@ def test_write_updater_script_with_banner_lines(tmp_path: Path) -> None:
     assert 'ui_print(" ");' in content
     assert 'ui_print("Quote \\" and slash \\\\");' in content
     assert 'package_extract_file("bin/avbctl", "/system/bin/avbctl");' in content
-    assert 'set_metadata("/system/bin/avbctl", "uid", 0, "gid", 0, "mode", 0755, "capabilities", 0x0);' in content
+    assert 'run_program("/sbin/sh", "-c", "chmod 0755 /system/bin/avbctl");' in content
+    assert 'run_program("/sbin/sh", "-c", "chown 0:0 /system/bin/avbctl");' in content
     assert 'run_program("/system/bin/avbctl", "--force", "disable-verity");' in content
     assert content.index('package_extract_file("bin/avbctl", "/system/bin/avbctl");') < content.index(
         'assert(update_dynamic_partitions(package_extract_file("dynamic_partitions_op_list")));'
@@ -118,7 +119,8 @@ def test_write_updater_script_includes_raw_images_and_slot_logic(tmp_path: Path)
     )
     content = updater_script.read_text()
     assert 'package_extract_file("bin/avbctl", "/system/bin/avbctl");' in content
-    assert 'set_metadata("/system/bin/avbctl", "uid", 0, "gid", 0, "mode", 0755, "capabilities", 0x0);' in content
+    assert 'run_program("/sbin/sh", "-c", "chmod 0755 /system/bin/avbctl");' in content
+    assert 'run_program("/sbin/sh", "-c", "chown 0:0 /system/bin/avbctl");' in content
     assert content.index('package_extract_file("bin/avbctl", "/system/bin/avbctl");') < content.index(
         'ui_print("Flashing raw images...");'
     )
