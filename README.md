@@ -1,209 +1,81 @@
 # payload2recovery
 
-Converts an Android OTA ZIP that contains `payload.bin` into a custom-recovery flashable ZIP.
-
-Generates `dynamic_partitions_op_list`, `updater-script`, and a final flashable ZIP instead of acting like a stock OTA client or seamless A/B updater.
+Converts Android OTA ZIPs with `payload.bin` into custom-recovery flashable ZIPs.
+Generates `dynamic_partitions_op_list`, `updater-script`, and final ZIP.
 
 ## Install
 
-From the current checkout:
-
 ```bash
-uv tool install .
-```
-
-From a GitHub repository:
-
-```bash
+uv tool install .                          # from checkout
 uv tool install git+https://github.com/ardiandideyashidiq/payload2recovery.git
+payload2recovery doctor                    # verify host deps
 ```
 
-Both installed commands are supported:
+## Development
 
 ```bash
-payload2recovery doctor
-p2r doctor
+uv sync --group dev
+uv run --group dev pytest                  # 51 tests
+uv run payload2recovery build ota.zip -p system vendor
 ```
 
-For local development:
+## Usage
 
 ```bash
-uv sync
-uv run payload2recovery --help
-uv run p2r --help
-```
-
-## Features
-
-- Extract partitions from `payload.bin` using `payload-dumper-go`
-- Select partitions from the default template, with `-p`, or with `--all`
-- Generate `dynamic_partitions_op_list` and `updater-script`
-- Compress `new.dat` payloads with Brotli
-- Add best-effort device assertions from OTA metadata
-- Bundle `avbctl` and disable AVB verity/verification during install
-- Flash raw images such as `logo`, `lk`, and other opt-in boot-side partitions
-- Read optional `banner` / `banner.txt` files and render them through `ui_print(...)`
-
-## Requirements
-
-- Linux
-- Python 3.11+
-- `zip`
-- `unzip`
-- `xz`
-
-Run this after install:
-
-```bash
-payload2recovery doctor
-```
-
-## payload2recovery Usage
-
-Basic build:
-
-```bash
-payload2recovery ota.zip
-```
-
-Short alias:
-
-```bash
-p2r ota.zip
-```
-
-Other common examples:
-
-```bash
-payload2recovery build ota.zip -p system vendor product
-payload2recovery build ota.zip --all
-payload2recovery build ota.zip -p system vendor --raw-partitions vendor_boot vbmeta
+payload2recovery ota.zip                   # build with default partitions
+p2r ota.zip                                # same thing, shorter
+payload2recovery ota.zip -p system vendor product
+payload2recovery ota.zip --all
+payload2recovery ota.zip --raw-partitions vendor_boot vbmeta
 payload2recovery list-partitions ota.zip
 payload2recovery inspect ota.zip
 payload2recovery benchmark ota.zip --benchmark-report benchmark.json
 ```
 
-Source checkouts also include these launchers:
-
-```bash
-./payload2recovery ota.zip
-./p2r ota.zip
-```
-
-Banner support:
-
-- Place `banner` or `banner.txt` next to the input OTA ZIP
-- `banner` is preferred when both files exist
-- Each line is emitted into the generated `updater-script`
-
-Example:
-
-```text
-releases/
-├── banner
-└── ota_build.zip
-```
-
-Example `banner` file:
-
-```text
-HyperOS Port
-
-Android 14
-Flash at your own risk
-```
-
-
-
-## Output and Workspace
-
-Default final output:
-
-- Output directory: `output/` next to the input OTA
-- Output filename: `<ota_name>-recovery.zip`
-
-Default temporary workspace:
-
-- A system temp directory such as `/tmp/payload2recovery-xxxxxx`
-- It is removed automatically unless you keep it
-
-Custom paths:
-
-```bash
-payload2recovery ota.zip --output-dir ./dist
-payload2recovery ota.zip --output-name rom_recovery.zip
-payload2recovery ota.zip --work-dir ./work --keep-temp
-```
-
-## Important Options
-
-- `-p, --partitions`: build only the named partitions
-- `--all`: include all extracted partitions supported by the current package generator
-- `--raw-partitions`: for `payload2recovery`, opt in excluded-by-default raw partitions such as `vendor_boot` or `vbmeta`
-- `--output-dir`: choose the final ZIP directory
-- `--output-name`: choose the final ZIP filename
-- `--work-dir`: use a fixed workspace instead of a temp directory
-- `--keep-temp`: preserve the workspace after the run
-- `--payload-dumper-go-binary`: override the bundled extractor
-- `--payload-threads`, `--extractor-workers`, `--converter-workers`, `--brotli-workers`: worker counts; `0` means all logical CPUs
-- `-b, --brotli-level`: Brotli level, default `5`
-- `-z, --zip-level`: ZIP compression level
-- `--no-brotli`: skip Brotli compression
+Place `banner` or `banner.txt` next to the OTA ZIP for custom `ui_print` lines.
 
 ## Configuration
 
-Repo-local defaults can be set in `config/settings.toml`:
-
+`config/settings.toml` — defaults for compression, concurrency, output:
 ```toml
 [tool.payload2recovery]
 brotli_level = 5
 zip_level = 6
-payload_threads = 0
+# worker counts: 0 = all logical CPUs
 extractor_workers = 0
 converter_workers = 0
 brotli_workers = 0
 compression = true
-verbose = true
 group_table = "main"
 group_table_size = 9663676416
-# payload_dumper_go_binary = "/usr/local/bin/payload-dumper-go"
 ```
 
+`config/default_partitions.txt` — one partition name per line, used when no `-p` given.
 
+## Requirements
+
+Linux, Python 3.11+, `zip`, `unzip`, `xz`.
+
+## Key Options
+
+| Flag | What |
+|------|------|
+| `-p system vendor` | select specific partitions |
+| `--all` | all supported partitions |
+| `--raw-partitions vendor_boot` | opt in boot-side raw images |
+| `--output-dir`, `--output-name` | output path control |
+| `--work-dir`, `--keep-temp` | workspace control |
+| `-b`, `-z`, `--no-brotli` | compression settings |
+| `--payload-threads`, `--*-workers` | concurrency; `0` = all CPUs |
 
 ## Limitations
 
-- Linux-only host workflow
-- The generated package is still constrained by recovery support for dynamic partitions and block image update commands
-- `--all` means all partitions supported by the current package generator, not literally every extracted image
-- `payload2recovery` includes `logo` and `lk` raw images by default when extracted, but keeps `boot`, `init_boot`, `vendor_boot`, `dtbo`, `recovery`, and `vbmeta*` excluded unless you opt in with `--raw-partitions`
-
-
-## Development
-
-```bash
-uv run --group dev pytest
-uv run payload2recovery doctor
-uv run payload2recovery build ota.zip -p system vendor
-
-python3 -m payload2recovery --help
-```
+Linux only. `--all` means all partitions the generator supports, not every image in the OTA.
+`logo` and `lk` are included by default; `boot`, `init_boot`, `vendor_boot`, `dtbo`, `recovery`, `vbmeta*` require `--raw-partitions`.
 
 ## Credits
 
-This project depends on and bundles work from other projects.
-
-- `payload-dumper-go`
-  - Used as the payload extraction backend
-  - Upstream: https://github.com/ssut/payload-dumper-go
-- Android Open Source Project OTA tooling
-  - Bundled Python components in `src/payload2recovery/assets/scripts/`
-  - Includes `blockimgdiff.py`, `common.py`, `rangelib.py`, and `sparse_img.py`
-  - Copyright: The Android Open Source Project
-- `img2sdat.py`
-  - Bundled conversion script by xpirt, luxi78, and howellzhu
-- `img2simg.py`
-  - Bundled sparse image helper used by the conversion pipeline
-- Python `brotli`
-  - Used for host-side Brotli compression
-  - Package: https://pypi.org/project/Brotli/
+- [payload-dumper-go](https://github.com/ssut/payload-dumper-go) — extraction backend
+- AOSP OTA tooling (`blockimgdiff.py`, `common.py`, `rangelib.py`, `sparse_img.py`)
+- xpirt/luxi78/howellzhu — `img2sdat.py`
+- Python `brotli` — host-side compression
