@@ -82,7 +82,7 @@ def _load_raw_image(item: object, manifest_path: Path) -> RawImageSpec:
         raise ValidationError(f"raw_images.file is required in {manifest_path}")
     if not target:
         raise ValidationError(f"raw_images.target is required for {file_name} in {manifest_path}")
-    if slot_policy not in {"none", "active"}:
+    if slot_policy not in {"none", "active", "both"}:
         raise ValidationError(
             f"Unsupported slot_policy for {file_name} in {manifest_path}: {slot_policy}"
         )

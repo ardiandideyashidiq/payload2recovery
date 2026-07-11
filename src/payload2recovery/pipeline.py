@@ -166,13 +166,14 @@ def build(
             extracted,
             options,
             settings,
-            default_raw_images | auto_raw_images,
+            default_raw_images,
             explicit_raw_images,
             unsupported_partitions,
+            auto_raw_images,
         )
         if auto_raw_images:
             LOGGER.info(
-                "Auto-detected firmware partitions (will flash as raw): %s",
+                "Auto-detected firmware partitions (will flash to both slots): %s",
                 ", ".join(sorted(auto_raw_images)),
             )
         validate_partition_layout([path.stem for path in selected])
@@ -485,6 +486,7 @@ def _select_partitions(
     default_raw_images: set[str],
     explicit_raw_images: set[str],
     unsupported_partitions: set[str],
+    auto_raw_images: set[str] | None = None,
 ) -> tuple[list[Path], list[RawImageSpec]]:
     available = {path.stem: path for path in extracted}
     supported, _, _, _, _ = _classify_extracted_partitions(extracted)
@@ -518,6 +520,7 @@ def _select_partitions(
         explicit_raw_images,
         unsupported_partitions,
         options.raw_partitions,
+        auto_raw_images,
     )
     return selected, raw_images
 
@@ -562,12 +565,14 @@ def _selected_raw_images(
     explicit_raw_images: set[str],
     unsupported_partitions: set[str],
     requested_raw_partitions: list[str],
+    auto_raw_images: set[str] | None = None,
 ) -> list[RawImageSpec]:
-    selected_names = sorted(default_raw_images)
+    auto_raw_images = auto_raw_images or set()
+    selected_names = sorted(default_raw_images | auto_raw_images)
     skipped_explicit: list[str] = []
     missing: list[str] = []
     for name in requested_raw_partitions:
-        if name in default_raw_images or name in explicit_raw_images:
+        if name in default_raw_images or name in explicit_raw_images or name in auto_raw_images:
             if name not in selected_names:
                 selected_names.append(name)
         elif name in unsupported_partitions:
@@ -586,7 +591,10 @@ def _selected_raw_images(
 
     raw_images: list[RawImageSpec] = []
     for name in selected_names:
-        raw_spec = _raw_image_spec_for_path(available[name], source="default")
+        if name in auto_raw_images:
+            raw_spec = _raw_image_spec_for_path(available[name], source="default", slot_policy="both")
+        else:
+            raw_spec = _raw_image_spec_for_path(available[name], source="default")
         if name in requested_raw_partitions:
             raw_spec.source = "explicit"
         raw_images.append(raw_spec)
@@ -617,7 +625,7 @@ def _is_explicit_raw_partition(name: str) -> bool:
     return name in _EXPLICIT_RAW_PARTITIONS or name.startswith(_EXPLICIT_RAW_PREFIXES)
 
 
-def _raw_image_spec_for_path(path: Path, source: str) -> RawImageSpec:
+def _raw_image_spec_for_path(path: Path, source: str, slot_policy: str = "active") -> RawImageSpec:
     name = path.stem
     if name == "logo":
         return RawImageSpec(
@@ -629,7 +637,7 @@ def _raw_image_spec_for_path(path: Path, source: str) -> RawImageSpec:
     return RawImageSpec(
         file=path.name,
         target=f"/dev/block/by-name/{name}",
-        slot_policy="active",
+        slot_policy=slot_policy,
         source=source,
     )
 

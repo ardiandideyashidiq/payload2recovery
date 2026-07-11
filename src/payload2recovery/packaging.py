@@ -156,6 +156,9 @@ def _raw_image_updater_lines(raw_images: list[RawImageSpec]) -> list[str]:
                     f'package_extract_file("{raw_image.file}", "{raw_image.target}_a"), '
                     f'package_extract_file("{raw_image.file}", "{raw_image.target}_b"));'
                 )
+            elif raw_image.slot_policy == "both":
+                lines.append(f'package_extract_file("{raw_image.file}", "{raw_image.target}_a");')
+                lines.append(f'package_extract_file("{raw_image.file}", "{raw_image.target}_b");')
             else:
                 lines.append(f'package_extract_file("{raw_image.file}", "{raw_image.target}");')
         lines.extend(["", 'ui_print("Updating dynamic partitions...");'])

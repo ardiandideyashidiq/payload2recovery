@@ -485,7 +485,7 @@ def _autodetect_raw_images(rom_dir: Path) -> list[RawImageSpec]:
     )
     for firmware_name in sorted(_AUTO_DETECT_FIRMWARE):
         definitions.append(
-            (f"{firmware_name}.img", f"/dev/block/by-name/{firmware_name}", "active")
+            (f"{firmware_name}.img", f"/dev/block/by-name/{firmware_name}", "both")
         )
     detected: list[RawImageSpec] = []
     for file_name, target, slot_policy in definitions:
