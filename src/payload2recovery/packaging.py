@@ -89,7 +89,7 @@ def write_updater_script(
         lines.extend(
             [
                 "",
-                f'ui_print("Flashing {partition.name}...");',
+                f'ui_print("Flashing {partition.name}" || getprop("ro.boot.slot_suffix") || "...");',
                 (
                     f'block_image_update(map_partition("{partition.name}"), '
                     f'package_extract_file("{partition.transfer_list.name}"), '
@@ -98,7 +98,15 @@ def write_updater_script(
                 f'  abort("E1001: Failed to flash {partition.name}");',
             ]
         )
-    lines.extend(["", 'ui_print("Installation complete!");'])
+    lines.extend(
+        [
+            "",
+            'ui_print("Flashing into slot " || getprop("ro.boot.slot_suffix") || " is finished!");',
+            'ui_print("");',
+            'ui_print("Don\'t forget to format data before booting!");',
+            'ui_print("");',
+        ]
+    )
     destination.write_text("\n".join(lines) + "\n")
 
 
@@ -132,6 +140,9 @@ def _raw_image_updater_lines(raw_images: list[RawImageSpec]) -> list[str]:
                     'getprop("ro.boot.slot_suffix") == "_b" || '
                     'abort("E1002: Unsupported slot suffix: " || getprop("ro.boot.slot_suffix") || "."));'
                 ),
+                'ui_print("Active slot:" || getprop("ro.boot.slot_suffix") || "");',
+                'ui_print("");',
+                'ui_print("Flashing on" || getprop("ro.boot.slot_suffix") || " slot...");',
                 "",
             ]
         )
