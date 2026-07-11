@@ -1,11 +1,8 @@
 # payload2recovery
 
-This repo ships two related tools:
+Converts an Android OTA ZIP that contains `payload.bin` into a custom-recovery flashable ZIP.
 
-- `payload2recovery`: converts an Android OTA ZIP that contains `payload.bin` into a custom-recovery flashable ZIP
-- `port2recovery`: converts a directory of extracted port ROM images into the same kind of recovery ZIP
-
-Both tools target a narrow Linux recovery workflow. They generate `dynamic_partitions_op_list`, `updater-script`, and a final flashable ZIP instead of acting like a stock OTA client or seamless A/B updater.
+Generates `dynamic_partitions_op_list`, `updater-script`, and a final flashable ZIP instead of acting like a stock OTA client or seamless A/B updater.
 
 ## Install
 
@@ -26,8 +23,6 @@ Both installed commands are supported:
 ```bash
 payload2recovery doctor
 p2r doctor
-port2recovery doctor
-pt2r doctor
 ```
 
 For local development:
@@ -36,8 +31,6 @@ For local development:
 uv sync
 uv run payload2recovery --help
 uv run p2r --help
-uv run port2recovery --help
-uv run pt2r --help
 ```
 
 ## Features
@@ -120,104 +113,7 @@ Android 14
 Flash at your own risk
 ```
 
-## port2recovery Usage
 
-Basic build:
-
-```bash
-port2recovery ./hyperos
-```
-
-Short alias:
-
-```bash
-pt2r ./hyperos
-```
-
-Other common examples:
-
-```bash
-port2recovery build ./hyperos -p system vendor product
-port2recovery build ./hyperos --all
-port2recovery inspect ./hyperos
-port2recovery list-partitions ./hyperos
-port2recovery benchmark ./hyperos --benchmark-report benchmark.json
-```
-
-### Input Folder Structure
-
-Minimal autodetect flow:
-
-```text
-hyperos/
-├── banner
-├── system.img
-├── vendor.img
-├── product.img
-├── system_ext.img
-├── vendor_dlkm.img
-├── logo.bin
-└── lk.img
-```
-
-In this mode, `port2recovery` auto-detects common raw files such as `logo.bin`, `lk.img`, `vendor_boot.img`, `vbmeta.img`, `vbmeta_system.img`, and `vbmeta_vendor.img` when they exist in the input root.
-
-Manifest-driven flow:
-
-```text
-hyperos/
-├── banner.txt
-├── port2recovery.toml
-├── system.img
-├── vendor.img
-├── product.img
-├── system_ext.img
-├── vendor_dlkm.img
-├── odm_dlkm.img
-├── logo.bin
-├── lk.img
-├── vendor_boot.img
-├── vbmeta.img
-├── vbmeta_system.img
-└── vbmeta_vendor.img
-```
-
-Example `port2recovery.toml`:
-
-```toml
-[device]
-assert_devices = ["P13001L-GL"]
-
-[dynamic_partitions]
-group_table = "main"
-
-[[raw_images]]
-file = "logo.bin"
-target = "/dev/block/by-name/logo"
-slot_policy = "none"
-
-[[raw_images]]
-file = "lk.img"
-target = "/dev/block/by-name/lk"
-slot_policy = "active"
-
-[[raw_images]]
-file = "vendor_boot.img"
-target = "/dev/block/by-name/vendor_boot"
-slot_policy = "active"
-
-[[raw_images]]
-file = "vbmeta.img"
-target = "/dev/block/by-name/vbmeta"
-slot_policy = "active"
-```
-
-Notes:
-
-- `banner` and `banner.txt` are read from the ROM directory root
-- blank lines in the banner are preserved
-- source `META-INF` content is ignored; the tool generates fresh installer metadata
-- if `raw_images` is present in `port2recovery.toml`, autodetect is skipped and the manifest fully controls raw-image inclusion
 
 ## Output and Workspace
 
@@ -273,19 +169,7 @@ group_table_size = 9663676416
 # payload_dumper_go_binary = "/usr/local/bin/payload-dumper-go"
 ```
 
-`port2recovery` can also use repo-local defaults from `config/port2recovery.toml`:
 
-```toml
-[tool.port2recovery]
-brotli_level = 5
-zip_level = 6
-converter_workers = 0
-brotli_workers = 0
-compression = true
-verbose = true
-group_table = "main"
-# group_table_size = 9663676416
-```
 
 ## Limitations
 
@@ -293,7 +177,7 @@ group_table = "main"
 - The generated package is still constrained by recovery support for dynamic partitions and block image update commands
 - `--all` means all partitions supported by the current package generator, not literally every extracted image
 - `payload2recovery` includes `logo` and `lk` raw images by default when extracted, but keeps `boot`, `init_boot`, `vendor_boot`, `dtbo`, `recovery`, and `vbmeta*` excluded unless you opt in with `--raw-partitions`
-- `port2recovery` logical partition conversion still applies only to partitions supported by the current dynamic-partition/block-image packaging flow
+
 
 ## Development
 
@@ -301,7 +185,7 @@ group_table = "main"
 uv run --group dev pytest
 uv run payload2recovery doctor
 uv run payload2recovery build ota.zip -p system vendor
-uv run port2recovery build ./hyperos -p system vendor
+
 python3 -m payload2recovery --help
 ```
 

@@ -1,9 +1,0 @@
-[tool.port2recovery]
-brotli_level = 5
-zip_level = 6
-converter_workers = 0
-brotli_workers = 0
-compression = true
-verbose = true
-group_table = "main"
-# group_table_size = 9663676416
