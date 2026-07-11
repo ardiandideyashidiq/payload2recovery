@@ -65,7 +65,7 @@ def _normalize_argv(argv: list[str] | None) -> list[str] | None:
     if argv is None:
         argv = sys.argv[1:]
     if not argv:
-        return argv
+        return ["--help"]
     commands = {"build", "benchmark", "inspect", "list-partitions", "doctor", "-h", "--help"}
     if argv[0] not in commands:
         return ["build", *argv]

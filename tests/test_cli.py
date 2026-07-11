@@ -50,7 +50,7 @@ def test_normalize_argv_passes_known_commands_unchanged(cmd: str) -> None:
 
 
 def test_normalize_argv_empty() -> None:
-    assert _normalize_argv([]) == []
+    assert _normalize_argv([]) == ["--help"]
 
 
 def test_normalize_argv_none(monkeypatch: pytest.MonkeyPatch) -> None:
