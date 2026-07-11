@@ -1,21 +1,21 @@
 from __future__ import annotations
 
-import brotli
 import importlib
 import logging
-from pathlib import Path
-from time import perf_counter
-from typing import Callable
 import shutil
 import stat
 import subprocess
 import sys
-from threading import Lock
 import zipfile
+from collections.abc import Callable
+from pathlib import Path
+from threading import Lock
+from time import perf_counter
+
+import brotli
 
 from payload2recovery.errors import ValidationError
 from payload2recovery.models import CompressionResult, ConverterResult
-
 
 LOGGER = logging.getLogger(__name__)
 _CONVERTER_IMPORT_LOCK = Lock()
@@ -27,9 +27,7 @@ def require_host_dependencies() -> None:
         raise ValidationError(f"Missing host dependencies: {', '.join(missing)}")
 
 
-def resolve_payload_dumper_go_binary(
-    vendored_binary: Path, override_binary: Path | None = None
-) -> Path:
+def resolve_payload_dumper_go_binary(vendored_binary: Path, override_binary: Path | None = None) -> Path:
     candidate = override_binary or vendored_binary
     if not candidate.exists():
         raise ValidationError(f"payload-dumper-go binary not found: {candidate}")
@@ -134,10 +132,12 @@ def compress_brotli(
 
 def _run(cmd: list[str], verbose: bool) -> None:
     stdout = None if verbose else subprocess.DEVNULL
-    stderr = None if verbose else subprocess.DEVNULL
-    completed = subprocess.run(cmd, stdout=stdout, stderr=stderr, check=False)
+    stderr = subprocess.PIPE
+    completed = subprocess.run(cmd, stdout=stdout, stderr=stderr, text=True, check=False)
     if completed.returncode != 0:
-        raise ValidationError(f"Command failed ({completed.returncode}): {' '.join(cmd)}")
+        stderr_text = completed.stderr.strip() if completed.stderr else ""
+        detail = f": {stderr_text}" if stderr_text else ""
+        raise ValidationError(f"Command failed ({completed.returncode}): {' '.join(cmd)}{detail}")
 
 
 def _sorted_images(output_dir: Path) -> list[Path]:
@@ -169,9 +169,7 @@ def _convert_img_to_sparse_in_process(script_dir: Path, image_path: Path) -> Non
     output_path.replace(image_path)
 
 
-def _convert_sparse_to_dat_subprocess(
-    script_dir: Path, image_path: Path, output_dir: Path, partition: str
-) -> None:
+def _convert_sparse_to_dat_subprocess(script_dir: Path, image_path: Path, output_dir: Path, partition: str) -> None:
     cmd = [
         "python3",
         str(script_dir / "img2sdat.py"),
@@ -183,7 +181,7 @@ def _convert_sparse_to_dat_subprocess(
         "-p",
         partition,
     ]
-    completed = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+    completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if completed.returncode != 0:
         message = completed.stderr.strip() or completed.stdout.strip() or "img2sdat failed"
         raise ValidationError(f"Command failed ({completed.returncode}): {' '.join(cmd)}: {message}")

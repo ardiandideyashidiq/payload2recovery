@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import shutil
-from threading import BoundedSemaphore
-import time
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import BoundedSemaphore
 
 from payload2recovery import __version__
 from payload2recovery.backends import (
@@ -21,7 +22,8 @@ from payload2recovery.backends import (
 from payload2recovery.config import Settings
 from payload2recovery.errors import ValidationError
 from payload2recovery.logging import stage_timer
-from payload2recovery.magiskboot import MagiskbootProbe, probe_image as _probe_image_magiskboot
+from payload2recovery.magiskboot import MagiskbootProbe
+from payload2recovery.magiskboot import probe_image as _probe_image_magiskboot
 from payload2recovery.metrics import MetricsCollector
 from payload2recovery.models import (
     BuildOptions,
@@ -43,7 +45,6 @@ from payload2recovery.packaging import (
 from payload2recovery.progress import LiveProgress
 from payload2recovery.resources import ResourcePaths
 
-
 LOGGER = logging.getLogger(__name__)
 
 _UNSUPPORTED_PARTITIONS = {"super", "userdata", "metadata"}
@@ -52,8 +53,14 @@ _CONDITIONAL_DEFAULT_RAW_PARTITIONS = {"boot"}
 _EXPLICIT_RAW_PARTITIONS = {"boot", "init_boot", "vendor_boot", "dtbo", "recovery"}
 _EXPLICIT_RAW_PREFIXES = ("vbmeta",)
 _KNOWN_LOGICAL_PARTITIONS = {
-    "system", "system_ext", "product", "vendor",
-    "odm", "odm_dlkm", "vendor_dlkm", "system_dlkm",
+    "system",
+    "system_ext",
+    "product",
+    "vendor",
+    "odm",
+    "odm_dlkm",
+    "vendor_dlkm",
+    "system_dlkm",
 }
 _DEFAULT_RAW_PROBES = {
     "boot",
@@ -101,9 +108,7 @@ def detect_device_assertion(ota_zip: Path) -> DeviceAssertion:
                 key = key.strip()
                 value = value.strip()
                 if key == "pre-device" and value:
-                    candidates.update(
-                        device.strip() for device in value.split(",") if device.strip()
-                    )
+                    candidates.update(device.strip() for device in value.split(",") if device.strip())
                     source = metadata_name
     return DeviceAssertion(
         device_names=sorted(candidates),
@@ -112,9 +117,7 @@ def detect_device_assertion(ota_zip: Path) -> DeviceAssertion:
     )
 
 
-def build(
-    options: BuildOptions, settings: Settings, resources: ResourcePaths
-) -> BuildResult:
+def build(options: BuildOptions, settings: Settings, resources: ResourcePaths) -> BuildResult:
     require_host_dependencies()
     if not options.ota_zip.exists():
         raise ValidationError(f"File not found: {options.ota_zip}")
@@ -131,7 +134,7 @@ def build(
     output_dir.mkdir(parents=True, exist_ok=True)
     metrics = MetricsCollector()
 
-    with _workspace(options) as workspace:
+    with _Workspace(options) as workspace:
         partitions_dir = workspace / "partitions"
         stage_output_dir = workspace / "package"
         partitions_dir.mkdir(parents=True, exist_ok=True)
@@ -162,10 +165,8 @@ def build(
         probes: dict[str, MagiskbootProbe] = {}
         if magiskboot_bin.is_file():
             for path in extracted:
-                try:
+                with contextlib.suppress(Exception):
                     probes[path.stem] = _probe_image_magiskboot(path, magiskboot_bin)
-                except Exception:
-                    pass
 
         (
             logical_partitions,
@@ -217,14 +218,10 @@ def build(
 
         group_size = options.group_table_size or settings.group_table_size
         if group_size is None:
-            group_size = calculate_group_table_size(
-                [artifact.image_size for artifact in artifacts]
-            )
+            group_size = calculate_group_table_size([artifact.image_size for artifact in artifacts])
         op_list = stage_output_dir / "dynamic_partitions_op_list"
         updater_script = stage_output_dir / "updater-script"
-        write_dynamic_partitions_op_list(
-            op_list, options.group_table, group_size, artifacts
-        )
+        write_dynamic_partitions_op_list(op_list, options.group_table, group_size, artifacts)
         if device_assertion.enabled:
             LOGGER.info(
                 "Adding device assertion for %s from %s",
@@ -232,9 +229,7 @@ def build(
                 device_assertion.source,
             )
         else:
-            LOGGER.warning(
-                "Skipping device assertion: no reliable OTA device metadata found"
-            )
+            LOGGER.warning("Skipping device assertion: no reliable OTA device metadata found")
         write_updater_script(
             updater_script,
             artifacts,
@@ -261,18 +256,15 @@ def build(
                     resources.avbctl,
                     final_output,
                     options.zip_level,
-                    progress_callback=lambda current_file,
-                    files_done,
-                    total_files,
-                    bytes_done,
-                    total_bytes,
-                    store_entry: zip_progress.update_package(
-                        current_file,
-                        files_done,
-                        total_files,
-                        bytes_done,
-                        total_bytes,
-                        store_entry=store_entry,
+                    progress_callback=lambda current_file, files_done, total_files, bytes_done, total_bytes, store_entry: (
+                        zip_progress.update_package(
+                            current_file,
+                            files_done,
+                            total_files,
+                            bytes_done,
+                            total_bytes,
+                            store_entry=store_entry,
+                        )
                     ),
                 )
             finally:
@@ -303,32 +295,18 @@ def build(
                     for item in staged_raw_images
                 ],
                 "extractor_workers": _resolved_extractor_workers(options, settings),
-                "converter_workers": _resolved_converter_workers(
-                    options, settings, len(selected)
-                ),
-                "brotli_workers": _resolved_brotli_workers(
-                    options, settings, len(selected)
-                ),
+                "converter_workers": _resolved_converter_workers(options, settings),
+                "brotli_workers": _resolved_brotli_workers(options, settings),
                 "device_assertion_enabled": device_assertion.enabled,
                 "device_assertion_names": device_assertion.device_names,
                 "device_assertion_source": device_assertion.source,
                 "artifact_size_bytes": final_output.stat().st_size,
-                "converter_version": artifacts[0].converter_version
-                if artifacts
-                else "",
+                "converter_version": artifacts[0].converter_version if artifacts else "",
                 "brotli_backend": "python-brotli",
-                "brotli_backend_version": artifacts[0].metrics.get(
-                    "brotli_backend_version", ""
-                )
-                if artifacts
-                else "",
+                "brotli_backend_version": artifacts[0].metrics.get("brotli_backend_version", "") if artifacts else "",
                 "partition_metrics": partition_metrics,
-                "total_raw_dat_bytes": sum(
-                    artifact.raw_dat_size for artifact in artifacts
-                ),
-                "total_compressed_bytes": sum(
-                    artifact.compressed_size for artifact in artifacts
-                ),
+                "total_raw_dat_bytes": sum(artifact.raw_dat_size for artifact in artifacts),
+                "total_compressed_bytes": sum(artifact.compressed_size for artifact in artifacts),
             },
         )
         if options.benchmark_report:
@@ -336,9 +314,7 @@ def build(
         return result
 
 
-def benchmark(
-    options: BuildOptions, settings: Settings, resources: ResourcePaths
-) -> dict[str, object]:
+def benchmark(options: BuildOptions, settings: Settings, resources: ResourcePaths) -> dict[str, object]:
     result = build(options, settings, resources)
     return {
         "output_path": str(result.output_path),
@@ -347,15 +323,13 @@ def benchmark(
     }
 
 
-def list_partitions(
-    options: BuildOptions, settings: Settings, resources: ResourcePaths
-) -> list[ListedPartition]:
+def list_partitions(options: BuildOptions, settings: Settings, resources: ResourcePaths) -> list[ListedPartition]:
     require_host_dependencies()
     extractor_binary = resolve_payload_dumper_go_binary(
         resources.payload_extractor,
         options.payload_dumper_go_binary or settings.payload_dumper_go_binary,
     )
-    with _workspace(options) as workspace:
+    with _Workspace(options) as workspace:
         payload_bin = extract_payload_bin(options.ota_zip, workspace)
         extracted = run_payload_extractor(
             extractor=extractor_binary,
@@ -370,7 +344,9 @@ def list_partitions(
             ListedPartition(
                 name=path.stem,
                 supported=path.stem in supported or path.stem in default_raw or path.stem in auto_raw,
-                status=_list_partition_status(path.stem, supported, default_raw, excluded_raw, unsupported, auto_raw, skipped),
+                status=_list_partition_status(
+                    path.stem, supported, default_raw, excluded_raw, unsupported, auto_raw, skipped
+                ),
             )
             for path in extracted
         ]
@@ -383,8 +359,8 @@ def _process_partitions(
     settings: Settings,
     resources: ResourcePaths,
 ) -> tuple[list[PartitionArtifact], list[dict[str, float | int | str | bool]]]:
-    workers = _resolved_converter_workers(options, settings, len(selected))
-    brotli_slots = _resolved_brotli_workers(options, settings, len(selected))
+    workers = _resolved_converter_workers(options, settings)
+    brotli_slots = _resolved_brotli_workers(options, settings)
     LOGGER.info("Using %d conversion workers", workers)
     LOGGER.info("Using %d brotli slots", brotli_slots)
     brotli_gate = BoundedSemaphore(brotli_slots)
@@ -452,7 +428,7 @@ def _build_partition_artifact(
                 level=options.brotli_level,
                 enabled=settings.compression and not options.no_brotli,
                 verbose=False,
-                workers=_resolved_brotli_workers(options, settings, 1),
+                workers=_resolved_brotli_workers(options, settings),
                 progress_callback=lambda processed, total, written: progress.update(
                     partition,
                     "brotli",
@@ -467,13 +443,11 @@ def _build_partition_artifact(
         metrics["brotli_level"] = compression_result.level
         metrics["compressed_size_bytes"] = compression_result.output_size
         metrics["compression_ratio"] = (
-            compression_result.output_size / compression_result.input_size
-            if compression_result.input_size
-            else 0.0
+            compression_result.output_size / compression_result.input_size if compression_result.input_size else 0.0
         )
-        metrics["compression_mib_per_sec"] = (
-            compression_result.input_size / (1024 * 1024)
-        ) / max(metrics["brotli_seconds"], 0.000001)
+        metrics["compression_mib_per_sec"] = (compression_result.input_size / (1024 * 1024)) / max(
+            metrics["brotli_seconds"], 0.000001
+        )
         patch_dat = stage_output_dir / f"{partition}.patch.dat"
         if not patch_dat.exists():
             patch_dat.write_bytes(b"")
@@ -518,22 +492,15 @@ def _select_partitions(
         selected = [available[name] for name in sorted(supported)]
         skipped = sorted(unsupported_partitions)
         if skipped:
-            LOGGER.warning(
-                "Skipping unsupported partitions in --all mode: %s", ", ".join(skipped)
-            )
+            LOGGER.warning("Skipping unsupported partitions in --all mode: %s", ", ".join(skipped))
     else:
         requested = settings.default_partitions
         selected = [available[name] for name in requested if name in available]
         skipped = [name for name in requested if name not in available]
     if not selected:
-        raise ValidationError(
-            "None of the requested partitions were found in the OTA payload"
-        )
-    if skipped:
-        if options.mode == "manual":
-            LOGGER.warning("Skipping unavailable partitions: %s", ", ".join(skipped))
-        elif options.mode == "template":
-            LOGGER.warning("Skipping unavailable partitions: %s", ", ".join(skipped))
+        raise ValidationError("None of the requested partitions were found in the OTA payload")
+    if skipped and (options.mode == "manual" or options.mode == "template"):
+        LOGGER.warning("Skipping unavailable partitions: %s", ", ".join(skipped))
     raw_images = _selected_raw_images(
         available,
         default_raw_images,
@@ -623,13 +590,9 @@ def _selected_raw_images(
             missing.append(name)
 
     if skipped_explicit:
-        LOGGER.warning(
-            "Skipping unsupported raw partitions: %s", ", ".join(sorted(skipped_explicit))
-        )
+        LOGGER.warning("Skipping unsupported raw partitions: %s", ", ".join(sorted(skipped_explicit)))
     if missing:
-        LOGGER.warning(
-            "Skipping unavailable raw partitions: %s", ", ".join(sorted(missing))
-        )
+        LOGGER.warning("Skipping unavailable raw partitions: %s", ", ".join(sorted(missing)))
 
     raw_images: list[RawImageSpec] = []
     for name in selected_names:
@@ -653,11 +616,9 @@ def _extractor_selected_partitions(options: BuildOptions) -> list[str] | None:
 
 
 def _is_default_raw_partition(name: str, extracted_names: set[str]) -> bool:
-    if name in _ALWAYS_DEFAULT_RAW_PARTITIONS:
-        return True
-    if name in _CONDITIONAL_DEFAULT_RAW_PARTITIONS and "vendor_boot" in extracted_names:
-        return True
-    return False
+    return name in _ALWAYS_DEFAULT_RAW_PARTITIONS or (
+        name in _CONDITIONAL_DEFAULT_RAW_PARTITIONS and "vendor_boot" in extracted_names
+    )
 
 
 def _is_explicit_raw_partition(name: str) -> bool:
@@ -699,7 +660,7 @@ def _list_partition_status(
     supported: set[str],
     default_raw: set[str],
     excluded_raw: set[str],
-    unsupported: set[str],
+    _unsupported: set[str],
     auto_raw: set[str] | None = None,
     skipped: set[str] | None = None,
 ) -> str:
@@ -712,7 +673,7 @@ def _list_partition_status(
     return "unsupported"
 
 
-class _workspace:
+class _Workspace:
     def __init__(self, options: BuildOptions) -> None:
         self.options = options
         self.path: Path | None = None
@@ -745,27 +706,21 @@ def _resolved_extractor_workers(options: BuildOptions, settings: Settings) -> in
     return settings.resolved_extractor_workers()
 
 
-def _resolved_converter_workers(
-    options: BuildOptions, settings: Settings, partition_count: int
-) -> int:
-    _ = partition_count
+def _resolved_converter_workers(options: BuildOptions, settings: Settings) -> int:
     if options.converter_workers > 0:
         return max(1, options.converter_workers)
     if options.workers > 0:
         return max(1, options.workers)
-    return settings.resolved_converter_workers(partition_count)
+    return settings.resolved_converter_workers()
 
 
-def _resolved_brotli_workers(
-    options: BuildOptions, settings: Settings, partition_count: int
-) -> int:
-    _ = partition_count
+def _resolved_brotli_workers(options: BuildOptions, settings: Settings) -> int:
     if options.brotli_workers > 0:
         return max(1, options.brotli_workers)
-    return settings.resolved_brotli_workers(partition_count)
+    return settings.resolved_brotli_workers()
 
 
-def _output_name(options: BuildOptions, settings: Settings) -> str:
+def _output_name(options: BuildOptions, _settings: Settings) -> str:
     if options.output_name:
         name = options.output_name
     else:
@@ -774,9 +729,7 @@ def _output_name(options: BuildOptions, settings: Settings) -> str:
     return name if name.endswith(".zip") else f"{name}.zip"
 
 
-def _write_benchmark_report(
-    path: Path, options: BuildOptions, result: BuildResult
-) -> None:
+def _write_benchmark_report(path: Path, options: BuildOptions, result: BuildResult) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "ota_zip": str(options.ota_zip),

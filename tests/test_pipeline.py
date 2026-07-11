@@ -1,14 +1,14 @@
-from pathlib import Path
 import json
 import zipfile
+from pathlib import Path
 
 import payload2recovery.pipeline as pipeline
 from payload2recovery.config import Settings
 from payload2recovery.models import BuildOptions, BuildResult, CompressionResult, ConverterResult
 from payload2recovery.pipeline import (
+    _classify_extracted_partitions,
     _output_name,
     _partition_support,
-    _classify_extracted_partitions,
     _write_benchmark_report,
     detect_device_assertion,
 )
@@ -118,6 +118,7 @@ def test_classify_extracted_partitions_keeps_boot_explicit_without_vendor_boot(
     assert auto_raw == set()
     assert skipped == set()
 
+
 def test_output_name_keeps_full_long_ota_stem() -> None:
     options = BuildOptions(
         ota_zip=Path("ota_super_extraordinarily_verbose_release_candidate_build_name_2026.zip"),
@@ -158,7 +159,7 @@ def test_list_partitions_reports_supported_excluded_and_unsupported(tmp_path: Pa
         return files
 
     monkeypatch.setattr(pipeline, "require_host_dependencies", lambda: None)
-    monkeypatch.setattr(pipeline, "resolve_payload_dumper_go_binary", lambda bundled, override: bundled)
+    monkeypatch.setattr(pipeline, "resolve_payload_dumper_go_binary", lambda bundled, _override: bundled)
     monkeypatch.setattr(pipeline, "extract_payload_bin", fake_extract_payload_bin)
     monkeypatch.setattr(pipeline, "run_payload_extractor", fake_run_payload_extractor)
 
@@ -195,7 +196,7 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
         output_dir: Path,
         workers: int,
         verbose: bool,
-        selected_partitions=None,
+        selected_partitions=None,  # noqa: ARG001
     ) -> list[Path]:
         _ = extractor, payload_path, workers, verbose
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -214,7 +215,7 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
 
     def fake_benchmark_converter(
         script_dir: Path,
-        image_path: Path,
+        _image_path: Path,
         output_dir: Path,
         partition: str,
         stage_callback=None,
@@ -263,12 +264,12 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
         )
 
     monkeypatch.setattr(pipeline, "require_host_dependencies", lambda: None)
-    monkeypatch.setattr(pipeline, "resolve_payload_dumper_go_binary", lambda bundled, override: bundled)
+    monkeypatch.setattr(pipeline, "resolve_payload_dumper_go_binary", lambda bundled, _override: bundled)
     monkeypatch.setattr(pipeline, "extract_payload_bin", fake_extract_payload_bin)
     monkeypatch.setattr(pipeline, "run_payload_extractor", fake_run_payload_extractor)
     monkeypatch.setattr(pipeline, "benchmark_converter", fake_benchmark_converter)
     monkeypatch.setattr(pipeline, "compress_brotli", fake_compress_brotli)
-    monkeypatch.setattr(pipeline, "detect_device_assertion", lambda ota: pipeline.DeviceAssertion())
+    monkeypatch.setattr(pipeline, "detect_device_assertion", lambda _ota: pipeline.DeviceAssertion())
 
     settings = Settings(default_partitions=["system"], verbose=False)
     options = BuildOptions(

@@ -1,5 +1,5 @@
-from pathlib import Path
 import os
+from pathlib import Path
 
 from payload2recovery.config import Settings, load_settings
 
@@ -34,7 +34,5 @@ def test_default_runtime_uses_all_logical_cpus() -> None:
     assert settings.brotli_level == 5
     assert settings.resolved_payload_threads() == expected
     assert settings.resolved_extractor_workers() == expected
-    assert settings.resolved_converter_workers(1) == expected
-    assert settings.resolved_converter_workers(8) == expected
-    assert settings.resolved_brotli_workers(1) == expected
-    assert settings.resolved_brotli_workers(8) == expected
+    assert settings.resolved_converter_workers() == expected
+    assert settings.resolved_brotli_workers() == expected

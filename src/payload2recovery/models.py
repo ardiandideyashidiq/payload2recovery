@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
+
+
+class BuildMode(StrEnum):
+    TEMPLATE = "template"
+    MANUAL = "manual"
+    ALL = "all"
 
 
 @dataclass(slots=True)
@@ -29,7 +36,7 @@ class RawImageSpec:
 @dataclass(slots=True)
 class BuildOptions:
     ota_zip: Path
-    mode: str
+    mode: BuildMode
     custom_partitions: list[str] = field(default_factory=list)
     raw_partitions: list[str] = field(default_factory=list)
     brotli_level: int = 6
@@ -91,3 +98,6 @@ class BuildResult:
     output_path: Path
     stage_timings: dict[str, float]
     build_metadata: dict[str, object] = field(default_factory=dict)
+
+
+UNSUPPORTED_PARTITIONS: frozenset[str] = frozenset({"super", "userdata", "metadata"})

@@ -153,9 +153,7 @@ class LiveProgress:
                 self._progress = None
                 self._console = None
 
-    def _render_partition_locked(
-        self, partition: str, state: _ProgressState, now: float
-    ) -> None:
+    def _render_partition_locked(self, partition: str, state: _ProgressState, now: float) -> None:
         self._ensure_progress_locked()
         assert self._progress is not None
         task_id = self._partition_tasks.get(partition)
@@ -182,7 +180,7 @@ class LiveProgress:
         if state.stage == "done":
             self._progress.stop_task(task_id)
 
-    def _render_zip_locked(self, now: float) -> None:
+    def _render_zip_locked(self, _now: float) -> None:
         self._ensure_progress_locked()
         assert self._progress is not None
         assert self._zip_state is not None
@@ -250,9 +248,7 @@ class LiveProgress:
         if bucket > state.last_logged_bucket:
             state.last_logged_bucket = bucket
             return True
-        if state.files_done == state.total_files and bucket == state.last_logged_bucket:
-            return True
-        return False
+        return state.files_done == state.total_files and bucket == state.last_logged_bucket
 
     def _format_plain_line(self, partition: str, state: _ProgressState, now: float) -> str:
         return f"{partition}: {self._format_status(state, now)}"

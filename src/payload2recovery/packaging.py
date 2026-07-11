@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
-from pathlib import Path
-from typing import Callable
 import zipfile
+from collections.abc import Callable
+from pathlib import Path
 
 from payload2recovery.errors import UnsupportedLayoutError
-from payload2recovery.models import DeviceAssertion, PartitionArtifact, RawImageSpec
-
+from payload2recovery.models import UNSUPPORTED_PARTITIONS, DeviceAssertion, PartitionArtifact, RawImageSpec
 
 _RECOVERY_ART = [
     "",
@@ -40,13 +38,11 @@ def calculate_group_table_size(sizes: list[int]) -> int:
 
 
 def validate_partition_layout(partitions: list[str]) -> None:
-    unsupported = {"super", "userdata", "metadata"}
+    unsupported = set(UNSUPPORTED_PARTITIONS)
     overlap = unsupported.intersection(partitions)
     if overlap:
         joined = ", ".join(sorted(overlap))
-        raise UnsupportedLayoutError(
-            f"Unsupported recovery package layout for partitions: {joined}"
-        )
+        raise UnsupportedLayoutError(f"Unsupported recovery package layout for partitions: {joined}")
 
 
 def write_dynamic_partitions_op_list(
@@ -130,7 +126,7 @@ def _device_assertion_lines(device_assertion: DeviceAssertion) -> list[str]:
     return [
         'ui_print("Checking target device...");',
         (
-            f'assert({checks} || '
+            f"assert({checks} || "
             f'abort("E1000: This package is for device(s): {expected}; this device is " '
             '|| getprop("ro.product.device") || "."));'
         ),
@@ -197,7 +193,10 @@ def _banner_ui_print_lines(banner_lines: list[str]) -> list[str]:
 
 
 def _escape_edify_string(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = escaped.replace("\n", " ").replace("\r", " ")
+    escaped = escaped.replace("\0", "")
+    return escaped
 
 
 def build_flashable_zip(
@@ -251,10 +250,12 @@ def build_flashable_zip(
 
 
 def human_size(path: Path) -> str:
-    result = subprocess.run(["du", "-h", str(path)], capture_output=True, text=True, check=False)
-    if result.returncode == 0 and result.stdout:
-        return result.stdout.split()[0]
-    return f"{path.stat().st_size} bytes"
+    size = path.stat().st_size
+    for unit in ("B", "K", "M", "G", "T"):
+        if size < 1024:
+            return f"{int(size)}{unit}"
+        size /= 1024
+    return f"{int(size)}P"
 
 
 def _write_zip_entry(

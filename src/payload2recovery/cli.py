@@ -3,16 +3,15 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from payload2recovery.config import load_settings
 from payload2recovery.errors import Payload2RecoveryError
 from payload2recovery.logging import configure_logging
-from payload2recovery.models import BuildOptions
+from payload2recovery.models import BuildMode, BuildOptions
 from payload2recovery.pipeline import benchmark, build, doctor, inspect_ota, list_partitions
 from payload2recovery.resources import ResourceManager
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -203,7 +202,7 @@ def _add_common_build_args(parser: argparse.ArgumentParser) -> None:
 
 def _options_from_args(args: argparse.Namespace, settings) -> BuildOptions:
     partitions = args.partitions or []
-    mode = "all" if getattr(args, "all", False) else "manual" if partitions else "template"
+    mode = BuildMode.ALL if getattr(args, "all", False) else BuildMode.MANUAL if partitions else BuildMode.TEMPLATE
     converter_workers = args.converter_workers or args.workers
     return BuildOptions(
         ota_zip=args.ota_zip,

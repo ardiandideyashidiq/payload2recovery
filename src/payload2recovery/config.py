@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import os
-from pathlib import Path
 import tomllib
+from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass(slots=True)
@@ -27,13 +27,12 @@ class Settings:
     def resolved_extractor_workers(self) -> int:
         return self.extractor_workers if self.extractor_workers > 0 else max(1, os.cpu_count() or 4)
 
-    def resolved_converter_workers(self, partition_count: int) -> int:
-        _ = partition_count
+    def resolved_converter_workers(self) -> int:
         return self.converter_workers if self.converter_workers > 0 else max(1, os.cpu_count() or 4)
 
-    def resolved_brotli_workers(self, partition_count: int) -> int:
-        _ = partition_count
+    def resolved_brotli_workers(self) -> int:
         return self.brotli_workers if self.brotli_workers > 0 else max(1, os.cpu_count() or 4)
+
 
 def load_settings(config_dir: Path, default_partitions_file: Path) -> Settings:
     settings = Settings(default_partitions=_load_default_partitions(default_partitions_file))

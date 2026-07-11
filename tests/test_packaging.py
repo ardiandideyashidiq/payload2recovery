@@ -1,10 +1,11 @@
-from pathlib import Path
 import zipfile
+from pathlib import Path
 
 from payload2recovery.models import DeviceAssertion, PartitionArtifact, RawImageSpec
 from payload2recovery.packaging import (
-    calculate_group_table_size,
+    _escape_edify_string,
     build_flashable_zip,
+    calculate_group_table_size,
     discover_banner_lines,
     validate_partition_layout,
     write_dynamic_partitions_op_list,
@@ -99,6 +100,26 @@ def test_write_updater_script_with_banner_lines(tmp_path: Path) -> None:
     )
 
 
+def test_escape_edify_string_handles_special_characters() -> None:
+    result = _escape_edify_string("normal line")
+    assert result == "normal line"
+
+    result = _escape_edify_string('quote " and backslash \\')
+    assert result == 'quote \\" and backslash \\\\'
+
+    result = _escape_edify_string("line with );")
+    assert result == "line with );"
+
+    result = _escape_edify_string("line with\nnewline")
+    assert result == "line with newline"
+
+    result = _escape_edify_string("line with\r\nCRLF")
+    assert result == "line with  CRLF"
+
+    result = _escape_edify_string("null\0byte")
+    assert result == "nullbyte"
+
+
 def test_write_updater_script_includes_raw_images_and_slot_logic(tmp_path: Path) -> None:
     artifact = PartitionArtifact(
         name="system",
@@ -144,7 +165,7 @@ def test_build_flashable_zip_creates_output_parent(tmp_path: Path) -> None:
     (payload_dir / "system.patch.dat").write_bytes(b"")
     meta_dir = payload_dir / "META-INF" / "com" / "google" / "android"
     meta_dir.mkdir(parents=True)
-    (meta_dir / "updater-script").write_text("ui_print(\"ok\");\n")
+    (meta_dir / "updater-script").write_text('ui_print("ok");\n')
 
     update_binary = tmp_path / "update-binary"
     update_binary.write_bytes(b"binary")
@@ -165,7 +186,7 @@ def test_build_flashable_zip_reports_monotonic_progress(tmp_path: Path) -> None:
     (payload_dir / "system.patch.dat").write_bytes(b"")
     meta_dir = payload_dir / "META-INF" / "com" / "google" / "android"
     meta_dir.mkdir(parents=True)
-    (meta_dir / "updater-script").write_text("ui_print(\"ok\");\n")
+    (meta_dir / "updater-script").write_text('ui_print("ok");\n')
 
     update_binary = tmp_path / "update-binary"
     update_binary.write_bytes(b"binary")
@@ -180,8 +201,10 @@ def test_build_flashable_zip_reports_monotonic_progress(tmp_path: Path) -> None:
         avbctl_binary,
         output_zip,
         zip_level=6,
-        progress_callback=lambda current_file, files_done, total_files, bytes_done, total_bytes, store_entry: events.append(
-            (current_file, files_done, total_files, bytes_done, total_bytes, store_entry)
+        progress_callback=lambda current_file, files_done, total_files, bytes_done, total_bytes, store_entry: (
+            events.append(  # noqa: E501
+                (current_file, files_done, total_files, bytes_done, total_bytes, store_entry)
+            )
         ),
     )
 
@@ -201,7 +224,7 @@ def test_build_flashable_zip_stores_brotli_entries(tmp_path: Path) -> None:
     (payload_dir / "system.patch.dat").write_bytes(b"")
     meta_dir = payload_dir / "META-INF" / "com" / "google" / "android"
     meta_dir.mkdir(parents=True)
-    (meta_dir / "updater-script").write_text("ui_print(\"ok\");\n")
+    (meta_dir / "updater-script").write_text('ui_print("ok");\n')
 
     update_binary = tmp_path / "update-binary"
     update_binary.write_bytes(b"binary")
