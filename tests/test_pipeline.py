@@ -93,12 +93,13 @@ def test_classify_extracted_partitions_separates_default_and_explicit_raw(tmp_pa
         tmp_path / "vbmeta.img",
         tmp_path / "super.img",
     ]
-    supported, default_raw, explicit_raw, unsupported, auto_raw = _classify_extracted_partitions(extracted)
+    supported, default_raw, explicit_raw, unsupported, auto_raw, skipped = _classify_extracted_partitions(extracted)
     assert supported == {"system"}
     assert default_raw == {"logo", "lk", "boot"}
-    assert explicit_raw == {"vendor_boot", "vbmeta"}
+    assert explicit_raw == {"vbmeta"}
     assert unsupported == {"super"}
     assert auto_raw == set()
+    assert skipped == {"vendor_boot"}
 
 
 def test_classify_extracted_partitions_keeps_boot_explicit_without_vendor_boot(
@@ -109,13 +110,13 @@ def test_classify_extracted_partitions_keeps_boot_explicit_without_vendor_boot(
         tmp_path / "boot.img",
         tmp_path / "vbmeta.img",
     ]
-    supported, default_raw, explicit_raw, unsupported, auto_raw = _classify_extracted_partitions(extracted)
+    supported, default_raw, explicit_raw, unsupported, auto_raw, skipped = _classify_extracted_partitions(extracted)
     assert supported == {"system"}
     assert default_raw == set()
     assert explicit_raw == {"boot", "vbmeta"}
     assert unsupported == set()
     assert auto_raw == set()
-
+    assert skipped == set()
 
 def test_output_name_keeps_full_long_ota_stem() -> None:
     options = BuildOptions(
@@ -173,7 +174,7 @@ def test_list_partitions_reports_supported_excluded_and_unsupported(tmp_path: Pa
     assert [(item.name, item.status) for item in listed] == [
         ("system", "supported"),
         ("logo", "supported"),
-        ("vendor_boot", "excluded-by-default"),
+        ("vendor_boot", "skipped-recovery"),
         ("super", "unsupported"),
     ]
 
@@ -197,13 +198,6 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
         selected_partitions=None,
     ) -> list[Path]:
         _ = extractor, payload_path, workers, verbose
-        assert selected_partitions == [
-            "boot",
-            "lk",
-            "logo",
-            "system",
-            "vendor_boot",
-        ]
         output_dir.mkdir(parents=True, exist_ok=True)
         created: list[Path] = []
         for name in (
@@ -297,24 +291,24 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
         assert "boot.img" in names
         assert "logo.bin" in names
         assert "lk.img" in names
-        assert "vendor_boot.img" in names
         assert "system.transfer.list" in names
         updater_script = archive.read("META-INF/com/google/android/updater-script").decode()
     assert 'package_extract_file("logo.bin", "/dev/block/by-name/logo");' in updater_script
     assert 'package_extract_file("lk.img", "/dev/block/by-name/lk_a")' in updater_script
+    assert 'package_extract_file("lk.img", "/dev/block/by-name/lk_b")' in updater_script
     assert 'package_extract_file("boot.img", "/dev/block/by-name/boot_a")' in updater_script
-    assert 'package_extract_file("vendor_boot.img", "/dev/block/by-name/vendor_boot_a")' in updater_script
+    assert 'package_extract_file("boot.img", "/dev/block/by-name/boot_b")' in updater_script
     assert result.build_metadata["raw_images"] == [
         {
             "file": "boot.img",
             "target": "/dev/block/by-name/boot",
-            "slot_policy": "active",
+            "slot_policy": "both",
             "source": "default",
         },
         {
             "file": "lk.img",
             "target": "/dev/block/by-name/lk",
-            "slot_policy": "active",
+            "slot_policy": "both",
             "source": "default",
         },
         {
@@ -322,11 +316,5 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
             "target": "/dev/block/by-name/logo",
             "slot_policy": "none",
             "source": "default",
-        },
-        {
-            "file": "vendor_boot.img",
-            "target": "/dev/block/by-name/vendor_boot",
-            "slot_policy": "active",
-            "source": "explicit",
         },
     ]

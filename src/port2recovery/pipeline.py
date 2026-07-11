@@ -471,16 +471,14 @@ def _autodetect_raw_images(rom_dir: Path) -> list[RawImageSpec]:
     has_vendor_boot = (rom_dir / "vendor_boot.img").is_file()
     definitions = [
         ("logo.bin", "/dev/block/by-name/logo", "none"),
-        ("lk.img", "/dev/block/by-name/lk", "active"),
+        ("lk.img", "/dev/block/by-name/lk", "both"),
     ]
     if has_vendor_boot:
-        definitions.append(("boot.img", "/dev/block/by-name/boot", "active"))
+        definitions.append(("boot.img", "/dev/block/by-name/boot", "both"))
     definitions.extend(
         [
-            ("init_boot.img", "/dev/block/by-name/init_boot", "active"),
-            ("vendor_boot.img", "/dev/block/by-name/vendor_boot", "active"),
-            ("dtbo.img", "/dev/block/by-name/dtbo", "active"),
-            ("recovery.img", "/dev/block/by-name/recovery", "active"),
+            ("init_boot.img", "/dev/block/by-name/init_boot", "both"),
+            ("dtbo.img", "/dev/block/by-name/dtbo", "both"),
         ]
     )
     for firmware_name in sorted(_AUTO_DETECT_FIRMWARE):

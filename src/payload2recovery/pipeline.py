@@ -21,6 +21,7 @@ from payload2recovery.backends import (
 from payload2recovery.config import Settings
 from payload2recovery.errors import ValidationError
 from payload2recovery.logging import stage_timer
+from payload2recovery.magiskboot import MagiskbootProbe, probe_image as _probe_image_magiskboot
 from payload2recovery.metrics import MetricsCollector
 from payload2recovery.models import (
     BuildOptions,
@@ -58,6 +59,8 @@ _DEFAULT_RAW_PROBES = {
     "boot",
     "vendor_boot",
 }
+
+_RECOVERY_SKIP_PARTITIONS: set[str] = {"recovery", "vendor_boot"}
 
 
 def doctor(settings: Settings | None = None) -> dict[str, object]:
@@ -155,13 +158,23 @@ def build(
         if not extracted:
             raise ValidationError("No partition images were extracted from payload.bin")
 
+        magiskboot_bin = resources.magiskboot
+        probes: dict[str, MagiskbootProbe] = {}
+        if magiskboot_bin.is_file():
+            for path in extracted:
+                try:
+                    probes[path.stem] = _probe_image_magiskboot(path, magiskboot_bin)
+                except Exception:
+                    pass
+
         (
             logical_partitions,
             default_raw_images,
             explicit_raw_images,
             unsupported_partitions,
             auto_raw_images,
-        ) = _classify_extracted_partitions(extracted)
+            skipped_partitions,
+        ) = _classify_extracted_partitions(extracted, probes)
         selected, staged_raw_images = _select_partitions(
             extracted,
             options,
@@ -170,11 +183,17 @@ def build(
             explicit_raw_images,
             unsupported_partitions,
             auto_raw_images,
+            skipped_partitions,
         )
         if auto_raw_images:
             LOGGER.info(
                 "Auto-detected firmware partitions (will flash to both slots): %s",
                 ", ".join(sorted(auto_raw_images)),
+            )
+        if skipped_partitions:
+            LOGGER.info(
+                "Skipping recovery-related partitions: %s",
+                ", ".join(sorted(skipped_partitions)),
             )
         validate_partition_layout([path.stem for path in selected])
 
@@ -346,12 +365,12 @@ def list_partitions(
             verbose=settings.verbose,
             selected_partitions=_extractor_selected_partitions(options),
         )
-        supported, default_raw, excluded_raw, unsupported, auto_raw = _classify_extracted_partitions(extracted)
+        supported, default_raw, excluded_raw, unsupported, auto_raw, skipped = _classify_extracted_partitions(extracted)
         return [
             ListedPartition(
                 name=path.stem,
                 supported=path.stem in supported or path.stem in default_raw or path.stem in auto_raw,
-                status=_list_partition_status(path.stem, supported, default_raw, excluded_raw, unsupported, auto_raw),
+                status=_list_partition_status(path.stem, supported, default_raw, excluded_raw, unsupported, auto_raw, skipped),
             )
             for path in extracted
         ]
@@ -487,9 +506,10 @@ def _select_partitions(
     explicit_raw_images: set[str],
     unsupported_partitions: set[str],
     auto_raw_images: set[str] | None = None,
+    skipped_partitions: set[str] | None = None,
 ) -> tuple[list[Path], list[RawImageSpec]]:
     available = {path.stem: path for path in extracted}
-    supported, _, _, _, _ = _classify_extracted_partitions(extracted)
+    supported, _, _, _, _, _ = _classify_extracted_partitions(extracted)
     if options.mode == "manual":
         requested = options.custom_partitions
         selected = [available[name] for name in requested if name in supported]
@@ -521,42 +541,58 @@ def _select_partitions(
         unsupported_partitions,
         options.raw_partitions,
         auto_raw_images,
+        skipped_partitions,
     )
     return selected, raw_images
 
 
 def _partition_support(extracted: list[Path]) -> tuple[set[str], set[str]]:
-    logical_supported, default_raw, explicit_raw, denied, auto_raw = _classify_extracted_partitions(extracted)
+    logical_supported, default_raw, explicit_raw, denied, auto_raw, skipped = _classify_extracted_partitions(extracted)
     unsupported = set(default_raw)
     unsupported.update(explicit_raw)
     unsupported.update(denied)
     unsupported.update(auto_raw)
+    unsupported.update(skipped)
     return logical_supported, unsupported
 
 
 def _classify_extracted_partitions(
     extracted: list[Path],
-) -> tuple[set[str], set[str], set[str], set[str], set[str]]:
+    magiskboot_probes: dict[str, MagiskbootProbe] | None = None,
+) -> tuple[set[str], set[str], set[str], set[str], set[str], set[str]]:
     extracted_names = {path.stem for path in extracted}
     logical_supported: set[str] = set()
     default_raw: set[str] = set()
     explicit_raw: set[str] = set()
     unsupported: set[str] = set()
     auto_raw: set[str] = set()
+    skipped: set[str] = set()
+
+    probes = magiskboot_probes or {}
 
     for path in extracted:
         name = path.stem
         if name in _UNSUPPORTED_PARTITIONS:
             unsupported.add(name)
+        elif name in _RECOVERY_SKIP_PARTITIONS:
+            skipped.add(name)
         elif _is_default_raw_partition(name, extracted_names):
-            default_raw.add(name)
+            if name == "boot" and _is_recovery_in_boot(name, probes):
+                skipped.add(name)
+            else:
+                default_raw.add(name)
         elif _is_explicit_raw_partition(name):
             explicit_raw.add(name)
         elif name in _KNOWN_LOGICAL_PARTITIONS:
             logical_supported.add(name)
         else:
             auto_raw.add(name)
-    return logical_supported, default_raw, explicit_raw, unsupported, auto_raw
+    return logical_supported, default_raw, explicit_raw, unsupported, auto_raw, skipped
+
+
+def _is_recovery_in_boot(name: str, probes: dict[str, MagiskbootProbe]) -> bool:
+    probe = probes.get(name)
+    return bool(probe and probe.is_valid and probe.recovery_dtbo_size > 0)
 
 
 def _selected_raw_images(
@@ -566,13 +602,19 @@ def _selected_raw_images(
     unsupported_partitions: set[str],
     requested_raw_partitions: list[str],
     auto_raw_images: set[str] | None = None,
+    skipped_partitions: set[str] | None = None,
 ) -> list[RawImageSpec]:
     auto_raw_images = auto_raw_images or set()
-    selected_names = sorted(default_raw_images | auto_raw_images)
+    skipped_partitions = skipped_partitions or set()
+    default_raw = {n for n in default_raw_images if n not in skipped_partitions}
+    auto_raw = {n for n in auto_raw_images if n not in skipped_partitions}
+    selected_names = sorted(default_raw | auto_raw)
     skipped_explicit: list[str] = []
     missing: list[str] = []
     for name in requested_raw_partitions:
-        if name in default_raw_images or name in explicit_raw_images or name in auto_raw_images:
+        if name in skipped_partitions:
+            continue
+        if name in default_raw or name in explicit_raw_images or name in auto_raw:
             if name not in selected_names:
                 selected_names.append(name)
         elif name in unsupported_partitions:
@@ -591,10 +633,7 @@ def _selected_raw_images(
 
     raw_images: list[RawImageSpec] = []
     for name in selected_names:
-        if name in auto_raw_images:
-            raw_spec = _raw_image_spec_for_path(available[name], source="default", slot_policy="both")
-        else:
-            raw_spec = _raw_image_spec_for_path(available[name], source="default")
+        raw_spec = _raw_image_spec_for_path(available[name], source="default", slot_policy="both")
         if name in requested_raw_partitions:
             raw_spec.source = "explicit"
         raw_images.append(raw_spec)
@@ -662,7 +701,10 @@ def _list_partition_status(
     excluded_raw: set[str],
     unsupported: set[str],
     auto_raw: set[str] | None = None,
+    skipped: set[str] | None = None,
 ) -> str:
+    if name in skipped:
+        return "skipped-recovery"
     if name in supported or name in default_raw or (auto_raw and name in auto_raw):
         return "supported"
     if name in excluded_raw:

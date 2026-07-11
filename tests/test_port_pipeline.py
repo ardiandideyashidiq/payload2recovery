@@ -256,21 +256,14 @@ def test_inspect_rom_autodetects_common_raw_images_without_manifest(tmp_path: Pa
         {
             "file": "lk.img",
             "target": "/dev/block/by-name/lk",
-            "slot_policy": "active",
+            "slot_policy": "both",
             "source": "autodetect",
             "exists": True,
         },
         {
             "file": "boot.img",
             "target": "/dev/block/by-name/boot",
-            "slot_policy": "active",
-            "source": "autodetect",
-            "exists": True,
-        },
-        {
-            "file": "vendor_boot.img",
-            "target": "/dev/block/by-name/vendor_boot",
-            "slot_policy": "active",
+            "slot_policy": "both",
             "source": "autodetect",
             "exists": True,
         },
@@ -355,7 +348,6 @@ def test_build_autodetects_raw_images_when_manifest_has_no_raw_entries(tmp_path:
         assert "boot.img" in names
         assert "logo.bin" in names
         assert "lk.img" in names
-        assert "vendor_boot.img" in names
 
     assert result.build_metadata["raw_images"] == [
         {
@@ -367,19 +359,13 @@ def test_build_autodetects_raw_images_when_manifest_has_no_raw_entries(tmp_path:
         {
             "file": "lk.img",
             "target": "/dev/block/by-name/lk",
-            "slot_policy": "active",
+            "slot_policy": "both",
             "source": "autodetect",
         },
         {
             "file": "boot.img",
             "target": "/dev/block/by-name/boot",
-            "slot_policy": "active",
-            "source": "autodetect",
-        },
-        {
-            "file": "vendor_boot.img",
-            "target": "/dev/block/by-name/vendor_boot",
-            "slot_policy": "active",
+            "slot_policy": "both",
             "source": "autodetect",
         },
     ]
