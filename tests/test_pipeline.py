@@ -93,11 +93,12 @@ def test_classify_extracted_partitions_separates_default_and_explicit_raw(tmp_pa
         tmp_path / "vbmeta.img",
         tmp_path / "super.img",
     ]
-    supported, default_raw, explicit_raw, unsupported = _classify_extracted_partitions(extracted)
+    supported, default_raw, explicit_raw, unsupported, auto_raw = _classify_extracted_partitions(extracted)
     assert supported == {"system"}
     assert default_raw == {"logo", "lk", "boot"}
     assert explicit_raw == {"vendor_boot", "vbmeta"}
     assert unsupported == {"super"}
+    assert auto_raw == set()
 
 
 def test_classify_extracted_partitions_keeps_boot_explicit_without_vendor_boot(
@@ -108,11 +109,12 @@ def test_classify_extracted_partitions_keeps_boot_explicit_without_vendor_boot(
         tmp_path / "boot.img",
         tmp_path / "vbmeta.img",
     ]
-    supported, default_raw, explicit_raw, unsupported = _classify_extracted_partitions(extracted)
+    supported, default_raw, explicit_raw, unsupported, auto_raw = _classify_extracted_partitions(extracted)
     assert supported == {"system"}
     assert default_raw == set()
     assert explicit_raw == {"boot", "vbmeta"}
     assert unsupported == set()
+    assert auto_raw == set()
 
 
 def test_output_name_keeps_full_long_ota_stem() -> None:

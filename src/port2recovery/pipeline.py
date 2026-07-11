@@ -266,6 +266,20 @@ def _discover_logical_images(rom_dir: Path) -> list[Path]:
     )
 
 
+_KNOWN_LOGICAL_PARTITIONS = {
+    "system", "system_ext", "product", "vendor",
+    "odm", "odm_dlkm", "vendor_dlkm", "system_dlkm",
+}
+
+# Firmware image file names that should be auto-detected as raw images
+_AUTO_DETECT_FIRMWARE = {
+    "abl", "xbl", "xbl_config", "tz", "hyp", "keymaster",
+    "cmnlib", "cmnlib64", "modem", "bluetooth", "dsp",
+    "devcfg", "storsec", "mba", "wcnss", "cdt", "qupfw",
+    "uefi", "aop", "cpucp", "shrm", "imagefv",
+}
+
+
 def _partition_support(extracted: list[Path]) -> tuple[set[str], set[str]]:
     names = [path.stem for path in extracted]
     supported: set[str] = set()
@@ -279,8 +293,10 @@ def _partition_support(extracted: list[Path]) -> tuple[set[str], set[str]]:
             unsupported.add(name)
         elif name in raw_only_exact or name.startswith(raw_only_prefixes):
             unsupported.add(name)
-        else:
+        elif name in _KNOWN_LOGICAL_PARTITIONS:
             supported.add(name)
+        else:
+            unsupported.add(name)
     return supported, unsupported
 
 
@@ -467,6 +483,10 @@ def _autodetect_raw_images(rom_dir: Path) -> list[RawImageSpec]:
             ("recovery.img", "/dev/block/by-name/recovery", "active"),
         ]
     )
+    for firmware_name in sorted(_AUTO_DETECT_FIRMWARE):
+        definitions.append(
+            (f"{firmware_name}.img", f"/dev/block/by-name/{firmware_name}", "active")
+        )
     detected: list[RawImageSpec] = []
     for file_name, target, slot_policy in definitions:
         if (rom_dir / file_name).is_file():

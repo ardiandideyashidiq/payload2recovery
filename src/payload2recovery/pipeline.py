@@ -50,6 +50,10 @@ _ALWAYS_DEFAULT_RAW_PARTITIONS = {"logo", "lk"}
 _CONDITIONAL_DEFAULT_RAW_PARTITIONS = {"boot"}
 _EXPLICIT_RAW_PARTITIONS = {"boot", "init_boot", "vendor_boot", "dtbo", "recovery"}
 _EXPLICIT_RAW_PREFIXES = ("vbmeta",)
+_KNOWN_LOGICAL_PARTITIONS = {
+    "system", "system_ext", "product", "vendor",
+    "odm", "odm_dlkm", "vendor_dlkm", "system_dlkm",
+}
 _DEFAULT_RAW_PROBES = {
     "boot",
     "vendor_boot",
@@ -156,15 +160,21 @@ def build(
             default_raw_images,
             explicit_raw_images,
             unsupported_partitions,
+            auto_raw_images,
         ) = _classify_extracted_partitions(extracted)
         selected, staged_raw_images = _select_partitions(
             extracted,
             options,
             settings,
-            default_raw_images,
+            default_raw_images | auto_raw_images,
             explicit_raw_images,
             unsupported_partitions,
         )
+        if auto_raw_images:
+            LOGGER.info(
+                "Auto-detected firmware partitions (will flash as raw): %s",
+                ", ".join(sorted(auto_raw_images)),
+            )
         validate_partition_layout([path.stem for path in selected])
 
         with (
@@ -335,12 +345,12 @@ def list_partitions(
             verbose=settings.verbose,
             selected_partitions=_extractor_selected_partitions(options),
         )
-        supported, default_raw, excluded_raw, unsupported = _classify_extracted_partitions(extracted)
+        supported, default_raw, excluded_raw, unsupported, auto_raw = _classify_extracted_partitions(extracted)
         return [
             ListedPartition(
                 name=path.stem,
-                supported=path.stem in supported or path.stem in default_raw,
-                status=_list_partition_status(path.stem, supported, default_raw, excluded_raw, unsupported),
+                supported=path.stem in supported or path.stem in default_raw or path.stem in auto_raw,
+                status=_list_partition_status(path.stem, supported, default_raw, excluded_raw, unsupported, auto_raw),
             )
             for path in extracted
         ]
@@ -477,7 +487,7 @@ def _select_partitions(
     unsupported_partitions: set[str],
 ) -> tuple[list[Path], list[RawImageSpec]]:
     available = {path.stem: path for path in extracted}
-    supported, _, _, _ = _classify_extracted_partitions(extracted)
+    supported, _, _, _, _ = _classify_extracted_partitions(extracted)
     if options.mode == "manual":
         requested = options.custom_partitions
         selected = [available[name] for name in requested if name in supported]
@@ -513,21 +523,23 @@ def _select_partitions(
 
 
 def _partition_support(extracted: list[Path]) -> tuple[set[str], set[str]]:
-    logical_supported, default_raw, explicit_raw, denied = _classify_extracted_partitions(extracted)
+    logical_supported, default_raw, explicit_raw, denied, auto_raw = _classify_extracted_partitions(extracted)
     unsupported = set(default_raw)
     unsupported.update(explicit_raw)
     unsupported.update(denied)
+    unsupported.update(auto_raw)
     return logical_supported, unsupported
 
 
 def _classify_extracted_partitions(
     extracted: list[Path],
-) -> tuple[set[str], set[str], set[str], set[str]]:
+) -> tuple[set[str], set[str], set[str], set[str], set[str]]:
     extracted_names = {path.stem for path in extracted}
     logical_supported: set[str] = set()
     default_raw: set[str] = set()
     explicit_raw: set[str] = set()
     unsupported: set[str] = set()
+    auto_raw: set[str] = set()
 
     for path in extracted:
         name = path.stem
@@ -537,9 +549,11 @@ def _classify_extracted_partitions(
             default_raw.add(name)
         elif _is_explicit_raw_partition(name):
             explicit_raw.add(name)
-        else:
+        elif name in _KNOWN_LOGICAL_PARTITIONS:
             logical_supported.add(name)
-    return logical_supported, default_raw, explicit_raw, unsupported
+        else:
+            auto_raw.add(name)
+    return logical_supported, default_raw, explicit_raw, unsupported, auto_raw
 
 
 def _selected_raw_images(
@@ -639,13 +653,12 @@ def _list_partition_status(
     default_raw: set[str],
     excluded_raw: set[str],
     unsupported: set[str],
+    auto_raw: set[str] | None = None,
 ) -> str:
-    if name in supported or name in default_raw:
+    if name in supported or name in default_raw or (auto_raw and name in auto_raw):
         return "supported"
     if name in excluded_raw:
         return "excluded-by-default"
-    if name in unsupported:
-        return "unsupported"
     return "unsupported"
 
 
