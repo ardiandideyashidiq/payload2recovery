@@ -10,6 +10,15 @@ from payload2recovery.errors import UnsupportedLayoutError
 from payload2recovery.models import DeviceAssertion, PartitionArtifact, RawImageSpec
 
 
+_RECOVERY_ART = [
+    "",
+    "",
+    "             >^..^<",
+    "",
+    "",
+]
+
+
 def discover_banner_lines(input_root: Path) -> list[str] | None:
     for name in ("banner", "banner.txt"):
         candidate = input_root / name
@@ -74,10 +83,11 @@ def write_updater_script(
     banner_lines: list[str] | None = None,
 ) -> None:
     raw_images = raw_images or []
-    lines = [
+    lines = _banner_ui_print_lines(_RECOVERY_ART)
+    lines.append(
         'run_program("/sbin/sh", "-c", "[ -d /data/cache ] || mkdir -p /data/cache");',
-        "",
-    ]
+    )
+    lines.append("")
     if banner_lines:
         lines.extend(_banner_ui_print_lines(banner_lines))
     if device_assertion and device_assertion.enabled and device_assertion.device_names:
