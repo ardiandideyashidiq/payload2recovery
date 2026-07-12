@@ -134,12 +134,13 @@ def test_write_updater_script_includes_superwipe_in_correct_order(tmp_path: Path
     content = updater_script.read_text()
     assert 'ui_print("Wiping super partition metadata...");' in content
     assert 'package_extract_dir("bin", "/tmp");' in content
-    assert 'set_perm(0, 0, 0755, "/tmp/superwipe");' in content
+    assert 'run_program("/sbin/sh", "-c", "chmod 0755 /tmp/superwipe");' in content
+    assert 'run_program("/sbin/sh", "-c", "chown 0:0 /tmp/superwipe");' in content
     assert 'run_program("/tmp/superwipe", "/tmp/super_empty.img");' in content
     assert content.index('run_program("/system/bin/avbctl", "--force", "disable-verification");') < content.index(
         'package_extract_dir("bin", "/tmp");'
     )
-    assert content.index('package_extract_dir("bin", "/tmp");') < content.index(
+    assert content.index('run_program("/tmp/superwipe", "/tmp/super_empty.img");') < content.index(
         'assert(update_dynamic_partitions(package_extract_file("dynamic_partitions_op_list")));'
     )
 

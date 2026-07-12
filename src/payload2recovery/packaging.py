@@ -176,7 +176,8 @@ def _superwipe_lines() -> list[str]:
     return [
         'ui_print("Wiping super partition metadata...");',
         'package_extract_dir("bin", "/tmp");',
-        'set_perm(0, 0, 0755, "/tmp/superwipe");',
+        'run_program("/sbin/sh", "-c", "chmod 0755 /tmp/superwipe");',
+        'run_program("/sbin/sh", "-c", "chown 0:0 /tmp/superwipe");',
         'run_program("/tmp/superwipe", "/tmp/super_empty.img");',
         "ui_print('');",
         "",
