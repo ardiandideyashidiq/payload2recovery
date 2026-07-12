@@ -157,16 +157,21 @@ def _raw_image_updater_lines(raw_images: list[RawImageSpec]) -> list[str]:
     if raw_images:
         lines.append('ui_print("Flashing raw images...");')
         for raw_image in raw_images:
+            name = raw_image.target.rsplit("/", 1)[-1]
             if raw_image.slot_policy == "active":
+                lines.append(f'ui_print("Flashing {name}...");')
                 lines.append(
                     f'ifelse(getprop("ro.boot.slot_suffix") == "_a", '
                     f'package_extract_file("{raw_image.file}", "{raw_image.target}_a"), '
                     f'package_extract_file("{raw_image.file}", "{raw_image.target}_b"));'
                 )
             elif raw_image.slot_policy == "both":
+                lines.append(f'ui_print("Flashing {name}_a...");')
                 lines.append(f'package_extract_file("{raw_image.file}", "{raw_image.target}_a");')
+                lines.append(f'ui_print("Flashing {name}_b...");')
                 lines.append(f'package_extract_file("{raw_image.file}", "{raw_image.target}_b");')
             else:
+                lines.append(f'ui_print("Flashing {name}...");')
                 lines.append(f'package_extract_file("{raw_image.file}", "{raw_image.target}");')
         lines.extend(["", 'ui_print("Updating dynamic partitions...");'])
     return lines
