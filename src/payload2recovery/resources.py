@@ -12,6 +12,8 @@ class ResourcePaths:
     magiskboot: Path
     payload_extractor: Path
     update_binary: Path
+    superwipe: Path
+    super_empty_img: Path
     default_partitions: Path
     scripts_dir: Path
 
@@ -26,15 +28,17 @@ class ResourceManager:
         magiskboot = self._stack.enter_context(as_file(assets / "bin" / "magiskboot"))
         payload_extractor = self._stack.enter_context(as_file(assets / "bin" / "payload-dumper-go"))
         update_binary = self._stack.enter_context(as_file(assets / "bin" / "update-binary"))
-        default_partitions = self._stack.enter_context(
-            as_file(assets / "config" / "default_partitions.txt")
-        )
+        superwipe = self._stack.enter_context(as_file(assets / "tools" / "superwipe"))
+        super_empty_img = self._stack.enter_context(as_file(assets / "tools" / "super_empty.img"))
+        default_partitions = self._stack.enter_context(as_file(assets / "config" / "default_partitions.txt"))
         scripts_dir = self._stack.enter_context(as_file(assets / "scripts"))
         return ResourcePaths(
             avbctl=Path(avbctl),
             magiskboot=Path(magiskboot),
             payload_extractor=Path(payload_extractor),
             update_binary=Path(update_binary),
+            superwipe=Path(superwipe),
+            super_empty_img=Path(super_empty_img),
             default_partitions=Path(default_partitions),
             scripts_dir=Path(scripts_dir),
         )

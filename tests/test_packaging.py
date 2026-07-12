@@ -120,6 +120,30 @@ def test_escape_edify_string_handles_special_characters() -> None:
     assert result == "nullbyte"
 
 
+def test_write_updater_script_includes_superwipe_in_correct_order(tmp_path: Path) -> None:
+    artifact = PartitionArtifact(
+        name="system",
+        image_path=tmp_path / "system.img",
+        image_size=1234,
+        transfer_list=tmp_path / "system.transfer.list",
+        new_dat_br=tmp_path / "system.new.dat.br",
+        patch_dat=tmp_path / "system.patch.dat",
+    )
+    updater_script = tmp_path / "updater-script"
+    write_updater_script(updater_script, [artifact])
+    content = updater_script.read_text()
+    assert 'ui_print("Wiping super partition metadata...");' in content
+    assert 'package_extract_dir("tools", "/tmp");' in content
+    assert 'set_perm(0, 0, 0755, "/tmp/superwipe");' in content
+    assert 'run_program("/tmp/superwipe", "/tmp/super_empty.img");' in content
+    assert content.index('run_program("/system/bin/avbctl", "--force", "disable-verification");') < content.index(
+        'package_extract_dir("tools", "/tmp");'
+    )
+    assert content.index('package_extract_dir("tools", "/tmp");') < content.index(
+        'assert(update_dynamic_partitions(package_extract_file("dynamic_partitions_op_list")));'
+    )
+
+
 def test_write_updater_script_includes_raw_images_and_slot_logic(tmp_path: Path) -> None:
     artifact = PartitionArtifact(
         name="system",
@@ -171,9 +195,21 @@ def test_build_flashable_zip_creates_output_parent(tmp_path: Path) -> None:
     update_binary.write_bytes(b"binary")
     avbctl_binary = tmp_path / "avbctl"
     avbctl_binary.write_bytes(b"binary")
+    superwipe_binary = tmp_path / "superwipe"
+    superwipe_binary.write_bytes(b"sw")
+    super_empty_img = tmp_path / "super_empty.img"
+    super_empty_img.write_bytes(b"img")
 
     output_zip = tmp_path / "missing" / "nested" / "result.zip"
-    build_flashable_zip(payload_dir, update_binary, avbctl_binary, output_zip, zip_level=0)
+    build_flashable_zip(
+        payload_dir,
+        update_binary,
+        avbctl_binary,
+        output_zip,
+        zip_level=0,
+        superwipe_binary=superwipe_binary,
+        super_empty_img=super_empty_img,
+    )
 
     assert output_zip.exists()
 
@@ -192,6 +228,10 @@ def test_build_flashable_zip_reports_monotonic_progress(tmp_path: Path) -> None:
     update_binary.write_bytes(b"binary")
     avbctl_binary = tmp_path / "avbctl"
     avbctl_binary.write_bytes(b"binary")
+    superwipe_binary = tmp_path / "superwipe"
+    superwipe_binary.write_bytes(b"sw")
+    super_empty_img = tmp_path / "super_empty.img"
+    super_empty_img.write_bytes(b"img")
     output_zip = tmp_path / "result.zip"
     events: list[tuple[str, int, int, int, int, bool]] = []
 
@@ -201,10 +241,10 @@ def test_build_flashable_zip_reports_monotonic_progress(tmp_path: Path) -> None:
         avbctl_binary,
         output_zip,
         zip_level=6,
-        progress_callback=lambda current_file, files_done, total_files, bytes_done, total_bytes, store_entry: (
-            events.append(  # noqa: E501
-                (current_file, files_done, total_files, bytes_done, total_bytes, store_entry)
-            )
+        superwipe_binary=superwipe_binary,
+        super_empty_img=super_empty_img,
+        progress_callback=lambda cur, done, total, bdone, btotal, store: events.append(
+            (cur, done, total, bdone, btotal, store)
         ),
     )
 
@@ -230,10 +270,59 @@ def test_build_flashable_zip_stores_brotli_entries(tmp_path: Path) -> None:
     update_binary.write_bytes(b"binary")
     avbctl_binary = tmp_path / "avbctl"
     avbctl_binary.write_bytes(b"binary")
+    superwipe_binary = tmp_path / "superwipe"
+    superwipe_binary.write_bytes(b"sw")
+    super_empty_img = tmp_path / "super_empty.img"
+    super_empty_img.write_bytes(b"img")
     output_zip = tmp_path / "result.zip"
-    build_flashable_zip(payload_dir, update_binary, avbctl_binary, output_zip, zip_level=6)
+    build_flashable_zip(
+        payload_dir,
+        update_binary,
+        avbctl_binary,
+        output_zip,
+        zip_level=6,
+        superwipe_binary=superwipe_binary,
+        super_empty_img=super_empty_img,
+    )
 
     with zipfile.ZipFile(output_zip) as archive:
         assert archive.getinfo("bin/avbctl").compress_type == zipfile.ZIP_DEFLATED
         assert archive.getinfo("system.new.dat.br").compress_type == zipfile.ZIP_STORED
         assert archive.getinfo("system.transfer.list").compress_type == zipfile.ZIP_DEFLATED
+
+
+def test_build_flashable_zip_includes_superwipe_tools(tmp_path: Path) -> None:
+    payload_dir = tmp_path / "payload"
+    payload_dir.mkdir()
+    (payload_dir / "system.transfer.list").write_text("4\n1\n0\n")
+    (payload_dir / "system.new.dat.br").write_bytes(b"payload")
+    (payload_dir / "system.patch.dat").write_bytes(b"")
+    meta_dir = payload_dir / "META-INF" / "com" / "google" / "android"
+    meta_dir.mkdir(parents=True)
+    (meta_dir / "updater-script").write_text('ui_print("ok");\n')
+
+    update_binary = tmp_path / "update-binary"
+    update_binary.write_bytes(b"binary")
+    avbctl_binary = tmp_path / "avbctl"
+    avbctl_binary.write_bytes(b"binary")
+    superwipe_binary = tmp_path / "superwipe"
+    superwipe_binary.write_bytes(b"superwipe-bin")
+    super_empty_img = tmp_path / "super_empty.img"
+    super_empty_img.write_bytes(b"img-data")
+
+    output_zip = tmp_path / "result.zip"
+    build_flashable_zip(
+        payload_dir,
+        update_binary,
+        avbctl_binary,
+        output_zip,
+        zip_level=0,
+        superwipe_binary=superwipe_binary,
+        super_empty_img=super_empty_img,
+    )
+
+    with zipfile.ZipFile(output_zip) as archive:
+        assert archive.getinfo("tools/superwipe")
+        assert archive.getinfo("tools/super_empty.img")
+        assert archive.read("tools/superwipe") == b"superwipe-bin"
+        assert archive.read("tools/super_empty.img") == b"img-data"

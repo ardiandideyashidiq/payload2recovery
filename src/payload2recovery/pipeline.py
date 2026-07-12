@@ -256,15 +256,15 @@ def build(options: BuildOptions, settings: Settings, resources: ResourcePaths) -
                     resources.avbctl,
                     final_output,
                     options.zip_level,
-                    progress_callback=lambda current_file, files_done, total_files, bytes_done, total_bytes, store_entry: (
-                        zip_progress.update_package(
-                            current_file,
-                            files_done,
-                            total_files,
-                            bytes_done,
-                            total_bytes,
-                            store_entry=store_entry,
-                        )
+                    resources.superwipe,
+                    resources.super_empty_img,
+                    progress_callback=lambda cur, done, total, bdone, btotal, store: zip_progress.update_package(
+                        cur,
+                        done,
+                        total,
+                        bdone,
+                        btotal,
+                        store_entry=store,
                     ),
                 )
             finally:

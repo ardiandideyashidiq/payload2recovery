@@ -89,6 +89,7 @@ def write_updater_script(
     if device_assertion and device_assertion.enabled and device_assertion.device_names:
         lines.extend(_device_assertion_lines(device_assertion))
     lines.extend(_avbctl_disable_lines())
+    lines.extend(_superwipe_lines())
     lines.extend(_raw_image_updater_lines(raw_images))
     lines.append('assert(update_dynamic_partitions(package_extract_file("dynamic_partitions_op_list")));')
     for partition in partitions:
@@ -171,6 +172,17 @@ def _raw_image_updater_lines(raw_images: list[RawImageSpec]) -> list[str]:
     return lines
 
 
+def _superwipe_lines() -> list[str]:
+    return [
+        'ui_print("Wiping super partition metadata...");',
+        'package_extract_dir("tools", "/tmp");',
+        'set_perm(0, 0, 0755, "/tmp/superwipe");',
+        'run_program("/tmp/superwipe", "/tmp/super_empty.img");',
+        "ui_print('');",
+        "",
+    ]
+
+
 def _avbctl_disable_lines() -> list[str]:
     return [
         'ui_print("Disabling AVB vbmeta...");',
@@ -205,6 +217,8 @@ def build_flashable_zip(
     avbctl_binary: Path,
     output_path: Path,
     zip_level: int,
+    superwipe_binary: Path,
+    super_empty_img: Path,
     progress_callback: Callable[[str, int, int, int, int, bool], None] | None = None,
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -214,6 +228,10 @@ def build_flashable_zip(
     avbctl_destination = payload_dir / "bin" / "avbctl"
     avbctl_destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(avbctl_binary, avbctl_destination)
+    tools_dir = payload_dir / "tools"
+    tools_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(superwipe_binary, tools_dir / "superwipe")
+    shutil.copy2(super_empty_img, tools_dir / "super_empty.img")
 
     file_entries = [path for path in sorted(payload_dir.rglob("*")) if path.is_file()]
     total_files = len(file_entries)
