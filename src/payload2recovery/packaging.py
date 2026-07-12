@@ -179,7 +179,7 @@ def _superwipe_lines() -> list[str]:
         'run_program("/sbin/sh", "-c", "chmod 0755 /tmp/superwipe");',
         'run_program("/sbin/sh", "-c", "chown 0:0 /tmp/superwipe");',
         'run_program("/tmp/superwipe", "/tmp/super_empty.img");',
-        "ui_print('');",
+        'ui_print("");',
         "",
     ]
 
