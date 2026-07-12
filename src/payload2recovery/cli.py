@@ -6,7 +6,7 @@ import logging
 import sys
 from pathlib import Path
 
-from payload2recovery.config import load_settings
+from payload2recovery.config import Settings, load_settings
 from payload2recovery.errors import Payload2RecoveryError
 from payload2recovery.logging import configure_logging
 from payload2recovery.models import BuildMode, BuildOptions
@@ -30,13 +30,13 @@ def main(argv: list[str] | None = None) -> int:
             settings.payload_dumper_go_binary = resource_paths.payload_extractor
         settings.verbose = True
         if getattr(args, "command", None) == "doctor":
-            info = doctor(settings)
-            print(json.dumps(info, indent=2, sort_keys=True))
+            doctor_info = doctor(settings)
+            print(json.dumps(doctor_info, indent=2, sort_keys=True))
             return 0
         if args.command == "inspect":
-            info = inspect_ota(args.ota_zip)
-            print(f"OTA: {info['ota_zip']}")
-            print(f"Size: {info['size']} bytes")
+            ota_info = inspect_ota(args.ota_zip)
+            print(f"OTA: {ota_info['ota_zip']}")
+            print(f"Size: {ota_info['size']} bytes")
             return 0
 
         options = _options_from_args(args, settings)
@@ -45,12 +45,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{partition.name} [{partition.status}]")
             return 0
         if args.command == "build":
-            result = build(options, settings, resource_paths)
-            print(result.output_path)
+            build_result = build(options, settings, resource_paths)
+            print(build_result.output_path)
             return 0
         if args.command == "benchmark":
-            result = benchmark(options, settings, resource_paths)
-            print(json.dumps(result, indent=2, sort_keys=True))
+            benchmark_result = benchmark(options, settings, resource_paths)
+            print(json.dumps(benchmark_result, indent=2, sort_keys=True))
             return 0
         parser.error("missing command")
     except Payload2RecoveryError as exc:
@@ -200,7 +200,7 @@ def _add_common_build_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("-v", "--verbose", action="store_true", help="Ignored; verbose logging is the default")
 
 
-def _options_from_args(args: argparse.Namespace, settings) -> BuildOptions:
+def _options_from_args(args: argparse.Namespace, settings: Settings) -> BuildOptions:
     partitions = args.partitions or []
     mode = BuildMode.ALL if getattr(args, "all", False) else BuildMode.MANUAL if partitions else BuildMode.TEMPLATE
     converter_workers = args.converter_workers or args.workers

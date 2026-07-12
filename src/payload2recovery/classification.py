@@ -81,9 +81,9 @@ def partition_status(
     auto_raw: set[str] | None = None,
     skipped: set[str] | None = None,
 ) -> str:
-    if name in skipped:
+    if skipped is not None and name in skipped:
         return "skipped-recovery"
-    if name in supported or name in default_raw or (auto_raw and name in auto_raw):
+    if name in supported or name in default_raw or (auto_raw is not None and name in auto_raw):
         return "supported"
     if name in excluded_raw:
         return "excluded-by-default"

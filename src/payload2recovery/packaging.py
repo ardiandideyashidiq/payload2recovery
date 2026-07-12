@@ -268,7 +268,7 @@ def build_flashable_zip(
 
 
 def human_size(path: Path) -> str:
-    size = path.stat().st_size
+    size: float = path.stat().st_size
     for unit in ("B", "K", "M", "G", "T"):
         if size < 1024:
             return f"{int(size)}{unit}"
@@ -291,7 +291,7 @@ def _write_zip_entry(
     zip_info = zipfile.ZipInfo.from_file(file_path, arcname.as_posix())
     zip_info.compress_type = zipfile.ZIP_STORED if store_entry or zip_level == 0 else zipfile.ZIP_DEFLATED
     if zip_info.compress_type == zipfile.ZIP_DEFLATED:
-        zip_info._compresslevel = zip_level
+        zip_info._compresslevel = zip_level  # type: ignore[attr-defined]
 
     with file_path.open("rb") as src, archive.open(zip_info, "w", force_zip64=True) as dst:
         while chunk := src.read(8 * 1024 * 1024):

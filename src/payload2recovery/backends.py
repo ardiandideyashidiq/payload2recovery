@@ -6,13 +6,14 @@ import shutil
 import stat
 import subprocess
 import sys
+import types
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
 from threading import Lock
 from time import perf_counter
 
-import brotli
+import brotli  # type: ignore[import-untyped]
 
 from payload2recovery.errors import ValidationError
 from payload2recovery.models import CompressionResult, ConverterResult
@@ -187,7 +188,7 @@ def _convert_sparse_to_dat_subprocess(script_dir: Path, image_path: Path, output
         raise ValidationError(f"Command failed ({completed.returncode}): {' '.join(cmd)}: {message}")
 
 
-def validate_converter_output(transfer_list: Path, new_dat: Path) -> dict[str, object]:
+def validate_converter_output(transfer_list: Path, new_dat: Path) -> dict[str, int | bool]:
     if not transfer_list.exists():
         raise ValidationError(f"Missing transfer list: {transfer_list}")
     if not new_dat.exists():
@@ -249,7 +250,7 @@ def benchmark_converter(
     return result, metrics
 
 
-def _load_script_module(script_dir: Path, module_name: str):
+def _load_script_module(script_dir: Path, module_name: str) -> types.ModuleType:
     with _CONVERTER_IMPORT_LOCK:
         scripts_path = str(script_dir)
         if scripts_path not in sys.path:

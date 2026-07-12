@@ -2,20 +2,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from payload2recovery.models import BuildOptions
+from payload2recovery.models import BuildOptions, PartitionArtifact, RawImageSpec
 
 
 def build_metadata(
     options: BuildOptions,
     extractor_binary: Path,
     _selected: list[Path],
-    artifacts: list,
-    staged_raw_images: list,
+    artifacts: list[PartitionArtifact],
+    staged_raw_images: list[RawImageSpec],
     logical_partitions: set[str],
     default_raw_images: set[str],
     explicit_raw_images: set[str],
     unsupported_partitions: set[str],
-    partition_metrics: list[dict],
+    partition_metrics: list[dict[str, float | int | str | bool]],
     device_assertion_enabled: bool,
     device_assertion_names: list[str],
     device_assertion_source: str,

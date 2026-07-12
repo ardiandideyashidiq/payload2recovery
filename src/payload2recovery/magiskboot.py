@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import logging
 import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+LOGGER = logging.getLogger(__name__)
+
 
 @dataclass(slots=True)
 class MagiskbootProbe:
     """Result of probing a partition image with magiskboot."""
+
     is_boot: bool
     is_vendor_boot: bool
     is_valid: bool
@@ -38,6 +42,13 @@ def probe_image(path: Path, magiskboot_bin: Path) -> MagiskbootProbe:
             check=False,
         )
         ret = result.returncode
+        LOGGER.debug(
+            "magiskboot probe %s → exit %d\nstdout:\n%s\nstderr:\n%s",
+            path.name,
+            ret,
+            result.stdout.strip() or "(empty)",
+            result.stderr.strip() or "(empty)",
+        )
 
         header_file = Path(tmpdir) / "header"
         if header_file.is_file():

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import shutil
@@ -165,8 +164,9 @@ def build(options: BuildOptions, settings: Settings, resources: ResourcePaths) -
         probes: dict[str, MagiskbootProbe] = {}
         if magiskboot_bin.is_file():
             for path in extracted:
-                with contextlib.suppress(Exception):
-                    probes[path.stem] = _probe_image_magiskboot(path, magiskboot_bin)
+                if path.stem not in _DEFAULT_RAW_PROBES:
+                    continue
+                probes[path.stem] = _probe_image_magiskboot(path, magiskboot_bin)
 
         (
             logical_partitions,
@@ -437,7 +437,8 @@ def _build_partition_artifact(
                     output_bytes=written,
                 ),
             )
-            metrics["brotli_seconds"] = time.perf_counter() - brotli_started
+            brotli_seconds = time.perf_counter() - brotli_started
+            metrics["brotli_seconds"] = brotli_seconds
         metrics["brotli_backend"] = compression_result.backend
         metrics["brotli_backend_version"] = compression_result.backend_version
         metrics["brotli_level"] = compression_result.level
@@ -445,8 +446,8 @@ def _build_partition_artifact(
         metrics["compression_ratio"] = (
             compression_result.output_size / compression_result.input_size if compression_result.input_size else 0.0
         )
-        metrics["compression_mib_per_sec"] = (compression_result.input_size / (1024 * 1024)) / max(
-            metrics["brotli_seconds"], 0.000001
+        metrics["compression_mib_per_sec"] = float(compression_result.input_size / (1024 * 1024)) / float(
+            metrics.get("brotli_seconds", 0.000001)
         )
         patch_dat = stage_output_dir / f"{partition}.patch.dat"
         if not patch_dat.exists():
@@ -664,9 +665,9 @@ def _list_partition_status(
     auto_raw: set[str] | None = None,
     skipped: set[str] | None = None,
 ) -> str:
-    if name in skipped:
+    if skipped is not None and name in skipped:
         return "skipped-recovery"
-    if name in supported or name in default_raw or (auto_raw and name in auto_raw):
+    if name in supported or name in default_raw or (auto_raw is not None and name in auto_raw):
         return "supported"
     if name in excluded_raw:
         return "excluded-by-default"
@@ -688,7 +689,7 @@ class _Workspace:
         self.path = Path(self._tempdir.name)
         return self.path
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: object) -> None:
         if self.path and (self.options.keep_temp or self.options.work_dir is not None):
             LOGGER.info("Keeping workspace at %s", self.path)
             return

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import io
 import sys
 import time
 from dataclasses import dataclass
 from threading import Lock
+from typing import IO
 
 from rich.console import Console
 from rich.progress import (
@@ -41,7 +41,7 @@ class _ZipProgressState:
 
 
 class LiveProgress:
-    def __init__(self, enabled: bool = True, stream: io.TextIOBase | None = None) -> None:
+    def __init__(self, enabled: bool = True, stream: IO[str] | None = None) -> None:
         self.stream = stream or sys.stderr
         self.enabled = enabled
         self._interactive = enabled and hasattr(self.stream, "isatty") and self.stream.isatty()

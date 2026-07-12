@@ -63,7 +63,7 @@ class ConverterResult:
     new_dat: Path
     backend: str
     backend_version: str
-    validation: dict[str, object] = field(default_factory=dict)
+    validation: dict[str, int | bool] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -89,7 +89,7 @@ class PartitionArtifact:
     converter_version: str = ""
     raw_dat_size: int = 0
     compressed_size: int = 0
-    validation: dict[str, object] = field(default_factory=dict)
+    validation: dict[str, int | bool] = field(default_factory=dict)
     metrics: dict[str, float | int | str | bool] = field(default_factory=dict)
 
 
