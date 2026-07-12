@@ -175,7 +175,7 @@ def _raw_image_updater_lines(raw_images: list[RawImageSpec]) -> list[str]:
 def _superwipe_lines() -> list[str]:
     return [
         'ui_print("Wiping super partition metadata...");',
-        'package_extract_dir("tools", "/tmp");',
+        'package_extract_dir("bin", "/tmp");',
         'set_perm(0, 0, 0755, "/tmp/superwipe");',
         'run_program("/tmp/superwipe", "/tmp/super_empty.img");',
         "ui_print('');",
@@ -228,10 +228,10 @@ def build_flashable_zip(
     avbctl_destination = payload_dir / "bin" / "avbctl"
     avbctl_destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(avbctl_binary, avbctl_destination)
-    tools_dir = payload_dir / "tools"
-    tools_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(superwipe_binary, tools_dir / "superwipe")
-    shutil.copy2(super_empty_img, tools_dir / "super_empty.img")
+    bin_dir = payload_dir / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(superwipe_binary, bin_dir / "superwipe")
+    shutil.copy2(super_empty_img, bin_dir / "super_empty.img")
 
     file_entries = [path for path in sorted(payload_dir.rglob("*")) if path.is_file()]
     total_files = len(file_entries)

@@ -133,13 +133,13 @@ def test_write_updater_script_includes_superwipe_in_correct_order(tmp_path: Path
     write_updater_script(updater_script, [artifact])
     content = updater_script.read_text()
     assert 'ui_print("Wiping super partition metadata...");' in content
-    assert 'package_extract_dir("tools", "/tmp");' in content
+    assert 'package_extract_dir("bin", "/tmp");' in content
     assert 'set_perm(0, 0, 0755, "/tmp/superwipe");' in content
     assert 'run_program("/tmp/superwipe", "/tmp/super_empty.img");' in content
     assert content.index('run_program("/system/bin/avbctl", "--force", "disable-verification");') < content.index(
-        'package_extract_dir("tools", "/tmp");'
+        'package_extract_dir("bin", "/tmp");'
     )
-    assert content.index('package_extract_dir("tools", "/tmp");') < content.index(
+    assert content.index('package_extract_dir("bin", "/tmp");') < content.index(
         'assert(update_dynamic_partitions(package_extract_file("dynamic_partitions_op_list")));'
     )
 
@@ -291,7 +291,7 @@ def test_build_flashable_zip_stores_brotli_entries(tmp_path: Path) -> None:
         assert archive.getinfo("system.transfer.list").compress_type == zipfile.ZIP_DEFLATED
 
 
-def test_build_flashable_zip_includes_superwipe_tools(tmp_path: Path) -> None:
+def test_build_flashable_zip_includes_superwipe_bin(tmp_path: Path) -> None:
     payload_dir = tmp_path / "payload"
     payload_dir.mkdir()
     (payload_dir / "system.transfer.list").write_text("4\n1\n0\n")
@@ -322,7 +322,7 @@ def test_build_flashable_zip_includes_superwipe_tools(tmp_path: Path) -> None:
     )
 
     with zipfile.ZipFile(output_zip) as archive:
-        assert archive.getinfo("tools/superwipe")
-        assert archive.getinfo("tools/super_empty.img")
-        assert archive.read("tools/superwipe") == b"superwipe-bin"
-        assert archive.read("tools/super_empty.img") == b"img-data"
+        assert archive.getinfo("bin/superwipe")
+        assert archive.getinfo("bin/super_empty.img")
+        assert archive.read("bin/superwipe") == b"superwipe-bin"
+        assert archive.read("bin/super_empty.img") == b"img-data"
