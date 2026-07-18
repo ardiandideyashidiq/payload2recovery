@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import BoundedSemaphore
+from uuid import uuid4
 
 from payload2recovery import __version__
 from payload2recovery.backends import (
@@ -678,24 +678,24 @@ class _Workspace:
     def __init__(self, options: BuildOptions) -> None:
         self.options = options
         self.path: Path | None = None
-        self._tempdir: tempfile.TemporaryDirectory[str] | None = None
+        self._p2r_created = False
 
     def __enter__(self) -> Path:
         if self.options.work_dir is not None:
             self.path = self.options.work_dir
             self.path.mkdir(parents=True, exist_ok=True)
             return self.path
-        self._tempdir = tempfile.TemporaryDirectory(prefix="payload2recovery-")
-        self.path = Path(self._tempdir.name)
+        self.path = self.options.ota_zip.parent / "tmp" / f"payload2recovery-{uuid4().hex[:8]}"
+        self.path.mkdir(parents=True, exist_ok=True)
+        self._p2r_created = True
         return self.path
 
     def __exit__(self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: object) -> None:
-        if self.path and (self.options.keep_temp or self.options.work_dir is not None):
-            LOGGER.info("Keeping workspace at %s", self.path)
+        if self.options.keep_temp:
+            if self.path:
+                LOGGER.info("Keeping workspace at %s", self.path)
             return
-        if self._tempdir is not None:
-            self._tempdir.cleanup()
-        elif self.path and self.path.exists():
+        if self._p2r_created and self.path and self.path.exists():
             shutil.rmtree(self.path, ignore_errors=True)
 
 
