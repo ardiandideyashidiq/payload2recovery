@@ -13,7 +13,7 @@ from pathlib import Path
 from threading import Lock
 from time import perf_counter
 
-import brotli  # type: ignore[import-untyped]
+import zstandard as zstd
 
 from payload2recovery.errors import ValidationError
 from payload2recovery.models import CompressionResult, ConverterResult
@@ -91,7 +91,7 @@ def convert_sparse_to_dat(
     )
 
 
-def compress_brotli(
+def compress_zstd(
     input_file: Path,
     level: int,
     enabled: bool,
@@ -99,16 +99,16 @@ def compress_brotli(
     workers: int = 0,
     progress_callback: Callable[[int, int, int], None] | None = None,
 ) -> CompressionResult:
-    output_file = input_file.with_suffix(input_file.suffix + ".br")
+    output_file = input_file.with_suffix(input_file.suffix + ".zst")
     input_size = input_file.stat().st_size
     _ = workers
-    backend = "python-brotli"
+    backend = "zstandard"
     if not enabled:
         input_file.replace(output_file)
         return CompressionResult(
             output_file=output_file,
             backend=backend,
-            backend_version=_brotli_backend_version(backend),
+            backend_version=_zstd_backend_version(),
             input_size=input_size,
             output_size=output_file.stat().st_size,
             level=level,
@@ -116,14 +116,14 @@ def compress_brotli(
         )
 
     if verbose:
-        LOGGER.info("Compressing %s with python-brotli level %d", input_file.name, level)
-    _compress_brotli_in_process(input_file, output_file, level, progress_callback=progress_callback)
+        LOGGER.info("Compressing %s with zstd level %d", input_file.name, level)
+    _compress_zstd_in_process(input_file, output_file, level, progress_callback=progress_callback)
     if not output_file.exists():
-        raise ValidationError(f"Brotli output missing: {output_file}")
+        raise ValidationError(f"Zstd output missing: {output_file}")
     return CompressionResult(
         output_file=output_file,
         backend=backend,
-        backend_version=_brotli_backend_version(backend),
+        backend_version=_zstd_backend_version(),
         input_size=input_size,
         output_size=output_file.stat().st_size,
         level=level,
@@ -267,36 +267,27 @@ def _converter_version() -> str:
     return "img2sdat-1.7-captured"
 
 
-def _compress_brotli_in_process(
+def _compress_zstd_in_process(
     input_file: Path,
     output_file: Path,
     level: int,
     progress_callback: Callable[[int, int, int], None] | None = None,
 ) -> None:
-    compressor = brotli.Compressor(mode=brotli.MODE_GENERIC, quality=level, lgwin=24)
+    cctx = zstd.ZstdCompressor(level=level)
     total_bytes = input_file.stat().st_size
     processed_bytes = 0
-    written_bytes = 0
     with input_file.open("rb") as src, output_file.open("wb") as dst:
+        writer = cctx.stream_writer(dst)
         if progress_callback is not None:
             progress_callback(0, total_bytes, 0)
         while chunk := src.read(8 * 1024 * 1024):
+            writer.write(chunk)
             processed_bytes += len(chunk)
-            compressed = compressor.process(chunk)
-            if compressed:
-                dst.write(compressed)
-                written_bytes += len(compressed)
             if progress_callback is not None:
-                progress_callback(processed_bytes, total_bytes, written_bytes)
-        tail = compressor.finish()
-        if tail:
-            dst.write(tail)
-            written_bytes += len(tail)
-        if progress_callback is not None:
-            progress_callback(total_bytes, total_bytes, written_bytes)
+                progress_callback(processed_bytes, total_bytes, processed_bytes)
+        writer.close()
     input_file.unlink()
 
 
-def _brotli_backend_version(backend: str) -> str:
-    _ = backend
-    return f"python-brotli-{getattr(brotli, '__version__', 'unknown')}"
+def _zstd_backend_version() -> str:
+    return f"zstandard-{zstd.__version__}"

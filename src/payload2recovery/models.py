@@ -39,17 +39,17 @@ class BuildOptions:
     mode: BuildMode
     custom_partitions: list[str] = field(default_factory=list)
     raw_partitions: list[str] = field(default_factory=list)
-    brotli_level: int = 6
+    zstd_level: int = 6
     zip_level: int = 6
     payload_threads: int = 0
     extractor_workers: int = 0
     converter_workers: int = 0
-    brotli_workers: int = 0
+    zstd_workers: int = 0
     workers: int = 0
     payload_dumper_go_binary: Path | None = None
     group_table: str = "main"
     group_table_size: int | None = None
-    no_brotli: bool = False
+    no_zstd: bool = False
     keep_temp: bool = False
     output_dir: Path | None = None
     work_dir: Path | None = None
@@ -83,7 +83,7 @@ class PartitionArtifact:
     image_path: Path
     image_size: int
     transfer_list: Path
-    new_dat_br: Path
+    new_dat_zst: Path
     patch_dat: Path | None = None
     converter: str = ""
     converter_version: str = ""

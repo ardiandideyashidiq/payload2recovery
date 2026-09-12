@@ -14,17 +14,17 @@ def _make_args(**overrides: object) -> argparse.Namespace:
     namespace.all = False
     namespace.partitions = None
     namespace.ota_zip = Path("ota.zip")
-    namespace.brotli_level = None
+    namespace.zstd_level = None
     namespace.zip_level = None
     namespace.payload_threads = 0
     namespace.extractor_workers = 0
     namespace.converter_workers = 0
-    namespace.brotli_workers = 0
+    namespace.zstd_workers = 0
     namespace.workers = 0
     namespace.payload_dumper_go_binary = None
     namespace.group_table = None
     namespace.group_table_size = None
-    namespace.no_brotli = False
+    namespace.no_zstd = False
     namespace.raw_partitions = []
     namespace.keep_temp = False
     namespace.output_dir = None
@@ -63,7 +63,7 @@ def test_parser_build_arguments() -> None:
     assert args.command == "build"
     assert args.ota_zip == Path("ota.zip")
     assert args.partitions is None
-    assert args.brotli_level is None
+    assert args.zstd_level is None
 
 
 def test_parser_mutually_exclusive_all() -> None:
@@ -96,7 +96,7 @@ def test_options_from_args_template_mode() -> None:
     settings = Settings()
     options = _options_from_args(args, settings)
     assert options.mode == "template"
-    assert options.brotli_level == settings.brotli_level
+    assert options.zstd_level == settings.zstd_level
     assert options.zip_level == settings.zip_level
 
 

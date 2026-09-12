@@ -34,7 +34,7 @@ def test_write_generated_metadata(tmp_path: Path) -> None:
         image_path=tmp_path / "system.img",
         image_size=1234,
         transfer_list=tmp_path / "system.transfer.list",
-        new_dat_br=tmp_path / "system.new.dat.br",
+        new_dat_zst=tmp_path / "system.new.dat.zst",
         patch_dat=tmp_path / "system.patch.dat",
     )
     op_list = tmp_path / "dynamic_partitions_op_list"
@@ -51,7 +51,7 @@ def test_write_updater_script_with_device_assertion(tmp_path: Path) -> None:
         image_path=tmp_path / "system.img",
         image_size=1234,
         transfer_list=tmp_path / "system.transfer.list",
-        new_dat_br=tmp_path / "system.new.dat.br",
+        new_dat_zst=tmp_path / "system.new.dat.zst",
         patch_dat=tmp_path / "system.patch.dat",
     )
     updater_script = tmp_path / "updater-script"
@@ -75,7 +75,7 @@ def test_write_updater_script_with_banner_lines(tmp_path: Path) -> None:
         image_path=tmp_path / "system.img",
         image_size=1234,
         transfer_list=tmp_path / "system.transfer.list",
-        new_dat_br=tmp_path / "system.new.dat.br",
+        new_dat_zst=tmp_path / "system.new.dat.zst",
         patch_dat=tmp_path / "system.patch.dat",
     )
     updater_script = tmp_path / "updater-script"
@@ -126,7 +126,7 @@ def test_write_updater_script_includes_superwipe_in_correct_order(tmp_path: Path
         image_path=tmp_path / "system.img",
         image_size=1234,
         transfer_list=tmp_path / "system.transfer.list",
-        new_dat_br=tmp_path / "system.new.dat.br",
+        new_dat_zst=tmp_path / "system.new.dat.zst",
         patch_dat=tmp_path / "system.patch.dat",
     )
     updater_script = tmp_path / "updater-script"
@@ -151,7 +151,7 @@ def test_write_updater_script_includes_raw_images_and_slot_logic(tmp_path: Path)
         image_path=tmp_path / "system.img",
         image_size=1234,
         transfer_list=tmp_path / "system.transfer.list",
-        new_dat_br=tmp_path / "system.new.dat.br",
+        new_dat_zst=tmp_path / "system.new.dat.zst",
         patch_dat=tmp_path / "system.patch.dat",
     )
     updater_script = tmp_path / "updater-script"
@@ -182,11 +182,17 @@ def test_discover_banner_lines_prefers_banner_over_banner_txt(tmp_path: Path) ->
     assert discover_banner_lines(tmp_path) == ["top", "", "bottom"]
 
 
+def _make_zstd_binary(tmp_path: Path) -> Path:
+    zstd = tmp_path / "zstd"
+    zstd.write_bytes(b"zstd-binary")
+    return zstd
+
+
 def test_build_flashable_zip_creates_output_parent(tmp_path: Path) -> None:
     payload_dir = tmp_path / "payload"
     payload_dir.mkdir()
     (payload_dir / "system.transfer.list").write_text("4\n1\n0\n")
-    (payload_dir / "system.new.dat.br").write_bytes(b"payload")
+    (payload_dir / "system.new.dat.zst").write_bytes(b"payload")
     (payload_dir / "system.patch.dat").write_bytes(b"")
     meta_dir = payload_dir / "META-INF" / "com" / "google" / "android"
     meta_dir.mkdir(parents=True)
@@ -210,6 +216,7 @@ def test_build_flashable_zip_creates_output_parent(tmp_path: Path) -> None:
         zip_level=0,
         superwipe_binary=superwipe_binary,
         super_empty_img=super_empty_img,
+        zstd_binary=_make_zstd_binary(tmp_path),
     )
 
     assert output_zip.exists()
@@ -219,7 +226,7 @@ def test_build_flashable_zip_reports_monotonic_progress(tmp_path: Path) -> None:
     payload_dir = tmp_path / "payload"
     payload_dir.mkdir()
     (payload_dir / "system.transfer.list").write_text("4\n1\n0\n")
-    (payload_dir / "system.new.dat.br").write_bytes(b"a" * (9 * 1024 * 1024))
+    (payload_dir / "system.new.dat.zst").write_bytes(b"a" * (9 * 1024 * 1024))
     (payload_dir / "system.patch.dat").write_bytes(b"")
     meta_dir = payload_dir / "META-INF" / "com" / "google" / "android"
     meta_dir.mkdir(parents=True)
@@ -244,6 +251,7 @@ def test_build_flashable_zip_reports_monotonic_progress(tmp_path: Path) -> None:
         zip_level=6,
         superwipe_binary=superwipe_binary,
         super_empty_img=super_empty_img,
+        zstd_binary=_make_zstd_binary(tmp_path),
         progress_callback=lambda cur, done, total, bdone, btotal, store: events.append(
             (cur, done, total, bdone, btotal, store)
         ),
@@ -257,11 +265,11 @@ def test_build_flashable_zip_reports_monotonic_progress(tmp_path: Path) -> None:
     assert [event[3] for event in events] == sorted(event[3] for event in events)
 
 
-def test_build_flashable_zip_stores_brotli_entries(tmp_path: Path) -> None:
+def test_build_flashable_zip_stores_zstd_entries(tmp_path: Path) -> None:
     payload_dir = tmp_path / "payload"
     payload_dir.mkdir()
     (payload_dir / "system.transfer.list").write_text("4\n1\n0\n")
-    (payload_dir / "system.new.dat.br").write_bytes(b"payload")
+    (payload_dir / "system.new.dat.zst").write_bytes(b"payload")
     (payload_dir / "system.patch.dat").write_bytes(b"")
     meta_dir = payload_dir / "META-INF" / "com" / "google" / "android"
     meta_dir.mkdir(parents=True)
@@ -284,19 +292,20 @@ def test_build_flashable_zip_stores_brotli_entries(tmp_path: Path) -> None:
         zip_level=6,
         superwipe_binary=superwipe_binary,
         super_empty_img=super_empty_img,
+        zstd_binary=_make_zstd_binary(tmp_path),
     )
 
     with zipfile.ZipFile(output_zip) as archive:
         assert archive.getinfo("bin/avbctl").compress_type == zipfile.ZIP_DEFLATED
-        assert archive.getinfo("system.new.dat.br").compress_type == zipfile.ZIP_STORED
+        assert archive.getinfo("system.new.dat.zst").compress_type == zipfile.ZIP_STORED
         assert archive.getinfo("system.transfer.list").compress_type == zipfile.ZIP_DEFLATED
 
 
-def test_build_flashable_zip_includes_superwipe_bin(tmp_path: Path) -> None:
+def test_build_flashable_zip_includes_superwipe_and_zstd_bin(tmp_path: Path) -> None:
     payload_dir = tmp_path / "payload"
     payload_dir.mkdir()
     (payload_dir / "system.transfer.list").write_text("4\n1\n0\n")
-    (payload_dir / "system.new.dat.br").write_bytes(b"payload")
+    (payload_dir / "system.new.dat.zst").write_bytes(b"payload")
     (payload_dir / "system.patch.dat").write_bytes(b"")
     meta_dir = payload_dir / "META-INF" / "com" / "google" / "android"
     meta_dir.mkdir(parents=True)
@@ -310,6 +319,8 @@ def test_build_flashable_zip_includes_superwipe_bin(tmp_path: Path) -> None:
     superwipe_binary.write_bytes(b"superwipe-bin")
     super_empty_img = tmp_path / "super_empty.img"
     super_empty_img.write_bytes(b"img-data")
+    zstd_binary = tmp_path / "zstd"
+    zstd_binary.write_bytes(b"zstd-bin")
 
     output_zip = tmp_path / "result.zip"
     build_flashable_zip(
@@ -320,10 +331,30 @@ def test_build_flashable_zip_includes_superwipe_bin(tmp_path: Path) -> None:
         zip_level=0,
         superwipe_binary=superwipe_binary,
         super_empty_img=super_empty_img,
+        zstd_binary=zstd_binary,
     )
 
     with zipfile.ZipFile(output_zip) as archive:
         assert archive.getinfo("bin/superwipe")
         assert archive.getinfo("bin/super_empty.img")
+        assert archive.getinfo("bin/zstd")
         assert archive.read("bin/superwipe") == b"superwipe-bin"
         assert archive.read("bin/super_empty.img") == b"img-data"
+        assert archive.read("bin/zstd") == b"zstd-bin"
+
+
+def test_write_updater_script_includes_zstd_decompress(tmp_path: Path) -> None:
+    artifact = PartitionArtifact(
+        name="system",
+        image_path=tmp_path / "system.img",
+        image_size=1234,
+        transfer_list=tmp_path / "system.transfer.list",
+        new_dat_zst=tmp_path / "system.new.dat.zst",
+        patch_dat=tmp_path / "system.patch.dat",
+    )
+    updater_script = tmp_path / "updater-script"
+    write_updater_script(updater_script, [artifact])
+    content = updater_script.read_text()
+    assert "chmod 0755 /tmp/zstd" in content
+    assert 'run_program("/tmp/zstd", "-d", "system.new.dat.zst")' in content
+    assert '"system.new.dat"' in content

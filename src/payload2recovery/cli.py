@@ -140,7 +140,7 @@ def _add_common_build_args(parser: argparse.ArgumentParser) -> None:
         nargs="+",
         help="Space-separated partition names. Defaults to the configured template.",
     )
-    parser.add_argument("-b", "--brotli-level", type=int, default=None, help="Brotli level 0-11")
+    parser.add_argument("-b", "--zstd-level", type=int, default=None, help="Zstd level 1-22")
     parser.add_argument("-z", "--zip-level", type=int, default=None, help="ZIP level 0-9")
     parser.add_argument(
         "--payload-threads",
@@ -161,10 +161,10 @@ def _add_common_build_args(parser: argparse.ArgumentParser) -> None:
         help="Concurrent partition conversion workers",
     )
     parser.add_argument(
-        "--brotli-workers",
+        "--zstd-workers",
         type=int,
         default=0,
-        help="Maximum concurrent brotli jobs across selected partitions",
+        help="Maximum concurrent zstd jobs across selected partitions",
     )
     parser.add_argument(
         "-j",
@@ -187,9 +187,9 @@ def _add_common_build_args(parser: argparse.ArgumentParser) -> None:
         help="Explicit group size in bytes. Defaults to computed size.",
     )
     parser.add_argument(
-        "--no-brotli",
+        "--no-zstd",
         action="store_true",
-        help="Skip brotli compression and keep *.new.dat.br as a renamed dat file",
+        help="Skip zstd compression and keep *.new.dat.zst as a renamed dat file",
     )
     parser.add_argument(
         "--raw-partitions",
@@ -209,17 +209,17 @@ def _options_from_args(args: argparse.Namespace, settings: Settings) -> BuildOpt
         mode=mode,
         custom_partitions=partitions,
         raw_partitions=args.raw_partitions or [],
-        brotli_level=args.brotli_level if args.brotli_level is not None else settings.brotli_level,
+        zstd_level=args.zstd_level if args.zstd_level is not None else settings.zstd_level,
         zip_level=args.zip_level if args.zip_level is not None else settings.zip_level,
         payload_threads=args.payload_threads,
         extractor_workers=args.extractor_workers,
         converter_workers=converter_workers,
-        brotli_workers=args.brotli_workers,
+        zstd_workers=args.zstd_workers,
         workers=args.workers,
         payload_dumper_go_binary=args.payload_dumper_go_binary or settings.payload_dumper_go_binary,
         group_table=args.group_table or settings.group_table,
         group_table_size=args.group_table_size,
-        no_brotli=args.no_brotli,
+        no_zstd=args.no_zstd,
         keep_temp=getattr(args, "keep_temp", False),
         output_dir=getattr(args, "output_dir", None),
         work_dir=getattr(args, "work_dir", None),

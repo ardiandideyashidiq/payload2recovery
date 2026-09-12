@@ -12,7 +12,7 @@ from uuid import uuid4
 from payload2recovery import __version__
 from payload2recovery.backends import (
     benchmark_converter,
-    compress_brotli,
+    compress_zstd,
     extract_payload_bin,
     require_host_dependencies,
     resolve_payload_dumper_go_binary,
@@ -258,6 +258,7 @@ def build(options: BuildOptions, settings: Settings, resources: ResourcePaths) -
                     options.zip_level,
                     resources.superwipe,
                     resources.super_empty_img,
+                    resources.zstd,
                     progress_callback=lambda cur, done, total, bdone, btotal, store: zip_progress.update_package(
                         cur,
                         done,
@@ -296,14 +297,14 @@ def build(options: BuildOptions, settings: Settings, resources: ResourcePaths) -
                 ],
                 "extractor_workers": _resolved_extractor_workers(options, settings),
                 "converter_workers": _resolved_converter_workers(options, settings),
-                "brotli_workers": _resolved_brotli_workers(options, settings),
+                "zstd_workers": _resolved_zstd_workers(options, settings),
                 "device_assertion_enabled": device_assertion.enabled,
                 "device_assertion_names": device_assertion.device_names,
                 "device_assertion_source": device_assertion.source,
                 "artifact_size_bytes": final_output.stat().st_size,
                 "converter_version": artifacts[0].converter_version if artifacts else "",
-                "brotli_backend": "python-brotli",
-                "brotli_backend_version": artifacts[0].metrics.get("brotli_backend_version", "") if artifacts else "",
+                "zstd_backend": "zstandard",
+                "zstd_backend_version": artifacts[0].metrics.get("zstd_backend_version", "") if artifacts else "",
                 "partition_metrics": partition_metrics,
                 "total_raw_dat_bytes": sum(artifact.raw_dat_size for artifact in artifacts),
                 "total_compressed_bytes": sum(artifact.compressed_size for artifact in artifacts),
@@ -360,10 +361,10 @@ def _process_partitions(
     resources: ResourcePaths,
 ) -> tuple[list[PartitionArtifact], list[dict[str, float | int | str | bool]]]:
     workers = _resolved_converter_workers(options, settings)
-    brotli_slots = _resolved_brotli_workers(options, settings)
+    zstd_slots = _resolved_zstd_workers(options, settings)
     LOGGER.info("Using %d conversion workers", workers)
-    LOGGER.info("Using %d brotli slots", brotli_slots)
-    brotli_gate = BoundedSemaphore(brotli_slots)
+    LOGGER.info("Using %d zstd slots", zstd_slots)
+    zstd_gate = BoundedSemaphore(zstd_slots)
     progress = LiveProgress(enabled=settings.verbose)
     results: list[PartitionArtifact] = []
     partition_metrics: list[dict[str, float | int | str | bool]] = []
@@ -377,7 +378,7 @@ def _process_partitions(
                     options,
                     settings,
                     resources,
-                    brotli_gate,
+                    zstd_gate,
                     progress,
                 )
                 for image_path in selected
@@ -399,7 +400,7 @@ def _build_partition_artifact(
     options: BuildOptions,
     settings: Settings,
     resources: ResourcePaths,
-    brotli_gate: BoundedSemaphore,
+    zstd_gate: BoundedSemaphore,
     progress: LiveProgress,
 ) -> PartitionArtifact:
     partition = image_path.stem
@@ -413,41 +414,41 @@ def _build_partition_artifact(
             stage_callback=lambda stage: progress.update(partition, stage),
         )
         new_dat = converter_result.new_dat
-        progress.update(partition, "waiting-brotli")
-        with brotli_gate:
+        progress.update(partition, "waiting-zstd")
+        with zstd_gate:
             progress.update(
                 partition,
-                "brotli",
+                "zstd",
                 processed_bytes=0,
                 total_bytes=new_dat.stat().st_size,
                 output_bytes=0,
             )
-            brotli_started = time.perf_counter()
-            compression_result = compress_brotli(
+            zstd_started = time.perf_counter()
+            compression_result = compress_zstd(
                 new_dat,
-                level=options.brotli_level,
-                enabled=settings.compression and not options.no_brotli,
+                level=options.zstd_level,
+                enabled=settings.compression and not options.no_zstd,
                 verbose=False,
-                workers=_resolved_brotli_workers(options, settings),
+                workers=_resolved_zstd_workers(options, settings),
                 progress_callback=lambda processed, total, written: progress.update(
                     partition,
-                    "brotli",
+                    "zstd",
                     processed_bytes=processed,
                     total_bytes=total,
                     output_bytes=written,
                 ),
             )
-            brotli_seconds = time.perf_counter() - brotli_started
-            metrics["brotli_seconds"] = brotli_seconds
-        metrics["brotli_backend"] = compression_result.backend
-        metrics["brotli_backend_version"] = compression_result.backend_version
-        metrics["brotli_level"] = compression_result.level
+            zstd_seconds = time.perf_counter() - zstd_started
+            metrics["zstd_seconds"] = zstd_seconds
+        metrics["zstd_backend"] = compression_result.backend
+        metrics["zstd_backend_version"] = compression_result.backend_version
+        metrics["zstd_level"] = compression_result.level
         metrics["compressed_size_bytes"] = compression_result.output_size
         metrics["compression_ratio"] = (
             compression_result.output_size / compression_result.input_size if compression_result.input_size else 0.0
         )
         metrics["compression_mib_per_sec"] = float(compression_result.input_size / (1024 * 1024)) / float(
-            metrics.get("brotli_seconds", 0.000001)
+            metrics.get("zstd_seconds", 0.000001)
         )
         patch_dat = stage_output_dir / f"{partition}.patch.dat"
         if not patch_dat.exists():
@@ -457,7 +458,7 @@ def _build_partition_artifact(
             image_path=image_path,
             image_size=image_size,
             transfer_list=converter_result.transfer_list,
-            new_dat_br=compression_result.output_file,
+            new_dat_zst=compression_result.output_file,
             patch_dat=patch_dat,
             converter=converter_result.backend,
             converter_version=converter_result.backend_version,
@@ -715,10 +716,10 @@ def _resolved_converter_workers(options: BuildOptions, settings: Settings) -> in
     return settings.resolved_converter_workers()
 
 
-def _resolved_brotli_workers(options: BuildOptions, settings: Settings) -> int:
-    if options.brotli_workers > 0:
-        return max(1, options.brotli_workers)
-    return settings.resolved_brotli_workers()
+def _resolved_zstd_workers(options: BuildOptions, settings: Settings) -> int:
+    if options.zstd_workers > 0:
+        return max(1, options.zstd_workers)
+    return settings.resolved_zstd_workers()
 
 
 def _output_name(options: BuildOptions, _settings: Settings) -> str:

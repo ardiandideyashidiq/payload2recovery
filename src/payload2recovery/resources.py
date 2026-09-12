@@ -16,6 +16,7 @@ class ResourcePaths:
     super_empty_img: Path
     default_partitions: Path
     scripts_dir: Path
+    zstd: Path
 
 
 class ResourceManager:
@@ -32,6 +33,7 @@ class ResourceManager:
         super_empty_img = self._stack.enter_context(as_file(assets / "tools" / "super_empty.img"))
         default_partitions = self._stack.enter_context(as_file(assets / "config" / "default_partitions.txt"))
         scripts_dir = self._stack.enter_context(as_file(assets / "scripts"))
+        zstd = self._stack.enter_context(as_file(assets / "bin" / "zstd"))
         return ResourcePaths(
             avbctl=Path(avbctl),
             magiskboot=Path(magiskboot),
@@ -41,6 +43,7 @@ class ResourceManager:
             super_empty_img=Path(super_empty_img),
             default_partitions=Path(default_partitions),
             scripts_dir=Path(scripts_dir),
+            zstd=Path(zstd),
         )
 
     def close(self) -> None:
