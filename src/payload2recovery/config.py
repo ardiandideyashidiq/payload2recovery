@@ -21,17 +21,18 @@ class Settings:
     group_table_size: int | None = None
     payload_dumper_go_binary: Path | None = None
 
-    def resolved_payload_threads(self) -> int:
-        return self.payload_threads if self.payload_threads > 0 else max(1, os.cpu_count() or 4)
-
     def resolved_extractor_workers(self) -> int:
-        return self.extractor_workers if self.extractor_workers > 0 else max(1, os.cpu_count() or 4)
+        return _resolve_workers(self.extractor_workers)
 
     def resolved_converter_workers(self) -> int:
-        return self.converter_workers if self.converter_workers > 0 else max(1, os.cpu_count() or 4)
+        return _resolve_workers(self.converter_workers)
 
     def resolved_zstd_workers(self) -> int:
-        return self.zstd_workers if self.zstd_workers > 0 else max(1, os.cpu_count() or 4)
+        return _resolve_workers(self.zstd_workers)
+
+
+def _resolve_workers(value: int) -> int:
+    return value if value > 0 else max(1, os.cpu_count() or 4)
 
 
 def load_settings(config_dir: Path, default_partitions_file: Path) -> Settings:

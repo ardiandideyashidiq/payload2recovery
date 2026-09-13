@@ -8,7 +8,6 @@ from payload2recovery.models import BuildOptions, BuildResult, CompressionResult
 from payload2recovery.pipeline import (
     _classify_extracted_partitions,
     _output_name,
-    _partition_support,
     _write_benchmark_report,
     detect_device_assertion,
 )
@@ -78,9 +77,9 @@ def test_partition_support_marks_raw_boot_artifacts_unsupported(tmp_path: Path) 
         tmp_path / "vendor_boot.img",
         tmp_path / "vbmeta.img",
     ]
-    supported, unsupported = _partition_support(extracted)
-    assert supported == {"system", "product"}
-    assert unsupported == {"logo", "lk", "boot", "vendor_boot", "vbmeta"}
+    logical, default_raw, explicit_raw, unsupported, auto_raw, skipped = _classify_extracted_partitions(extracted)
+    assert logical == {"system", "product"}
+    assert unsupported | default_raw | explicit_raw | skipped == {"logo", "lk", "boot", "vendor_boot", "vbmeta"}
 
 
 def test_classify_extracted_partitions_separates_default_and_explicit_raw(tmp_path: Path) -> None:

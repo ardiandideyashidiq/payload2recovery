@@ -215,7 +215,6 @@ def _options_from_args(args: argparse.Namespace, settings: Settings) -> BuildOpt
         extractor_workers=args.extractor_workers,
         converter_workers=converter_workers,
         zstd_workers=args.zstd_workers,
-        workers=args.workers,
         payload_dumper_go_binary=args.payload_dumper_go_binary or settings.payload_dumper_go_binary,
         group_table=args.group_table or settings.group_table,
         group_table_size=args.group_table_size,

@@ -25,6 +25,7 @@ from payload2recovery.magiskboot import MagiskbootProbe
 from payload2recovery.magiskboot import probe_image as _probe_image_magiskboot
 from payload2recovery.metrics import MetricsCollector
 from payload2recovery.models import (
+    UNSUPPORTED_PARTITIONS,
     BuildOptions,
     BuildResult,
     DeviceAssertion,
@@ -46,7 +47,6 @@ from payload2recovery.resources import ResourcePaths
 
 LOGGER = logging.getLogger(__name__)
 
-_UNSUPPORTED_PARTITIONS = {"super", "userdata", "metadata"}
 _ALWAYS_DEFAULT_RAW_PARTITIONS = {"logo", "lk"}
 _CONDITIONAL_DEFAULT_RAW_PARTITIONS = {"boot"}
 _EXPLICIT_RAW_PARTITIONS = {"boot", "init_boot", "vendor_boot", "dtbo", "recovery"}
@@ -515,16 +515,6 @@ def _select_partitions(
     return selected, raw_images
 
 
-def _partition_support(extracted: list[Path]) -> tuple[set[str], set[str]]:
-    logical_supported, default_raw, explicit_raw, denied, auto_raw, skipped = _classify_extracted_partitions(extracted)
-    unsupported = set(default_raw)
-    unsupported.update(explicit_raw)
-    unsupported.update(denied)
-    unsupported.update(auto_raw)
-    unsupported.update(skipped)
-    return logical_supported, unsupported
-
-
 def _classify_extracted_partitions(
     extracted: list[Path],
     magiskboot_probes: dict[str, MagiskbootProbe] | None = None,
@@ -541,7 +531,7 @@ def _classify_extracted_partitions(
 
     for path in extracted:
         name = path.stem
-        if name in _UNSUPPORTED_PARTITIONS:
+        if name in UNSUPPORTED_PARTITIONS:
             unsupported.add(name)
         elif name in _RECOVERY_SKIP_PARTITIONS:
             skipped.add(name)
@@ -711,8 +701,6 @@ def _resolved_extractor_workers(options: BuildOptions, settings: Settings) -> in
 def _resolved_converter_workers(options: BuildOptions, settings: Settings) -> int:
     if options.converter_workers > 0:
         return max(1, options.converter_workers)
-    if options.workers > 0:
-        return max(1, options.workers)
     return settings.resolved_converter_workers()
 
 

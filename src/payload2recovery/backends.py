@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib
 import logging
 import shutil
-import stat
 import subprocess
 import sys
 import types
@@ -20,6 +19,8 @@ from payload2recovery.models import CompressionResult, ConverterResult
 
 LOGGER = logging.getLogger(__name__)
 _CONVERTER_IMPORT_LOCK = Lock()
+_CONVERTER_VERSION = "img2sdat-1.7-captured"
+_ZSTD_BACKEND_VERSION = f"zstandard-{zstd.__version__}"
 
 
 def require_host_dependencies() -> None:
@@ -67,7 +68,15 @@ def run_payload_extractor(
 
 
 def convert_img_to_sparse(script_dir: Path, image_path: Path) -> None:
-    _convert_img_to_sparse_in_process(script_dir, image_path)
+    module = _load_script_module(script_dir, "img2simg")
+    output_path = image_path.with_suffix(".img.sparse")
+    blocksize = 4096
+    with image_path.open("rb") as src, output_path.open("wb") as dst:
+        writer = module.SimgWriter(dst, blocksize=blocksize)
+        while chunk := src.read(8 * 1024 * 1024):
+            writer.write(chunk)
+        writer.close()
+    output_path.replace(image_path)
 
 
 def convert_sparse_to_dat(
@@ -77,17 +86,36 @@ def convert_sparse_to_dat(
     partition: str,
 ) -> ConverterResult:
     _convert_sparse_to_dat_subprocess(script_dir, image_path, output_dir, partition)
-    backend_name = "python"
-    backend_version = _converter_version()
     transfer = output_dir / f"{partition}.transfer.list"
     new_dat = output_dir / f"{partition}.new.dat"
-    validation = validate_converter_output(transfer, new_dat)
+    if not transfer.exists():
+        raise ValidationError(f"Missing transfer list: {transfer}")
+    if not new_dat.exists():
+        raise ValidationError(f"Missing new.dat output: {new_dat}")
+    transfer_lines = [line.strip() for line in transfer.read_text().splitlines() if line.strip()]
+    if len(transfer_lines) < 2:
+        raise ValidationError(f"Transfer list is too short: {transfer}")
+    try:
+        transfer_version = int(transfer_lines[0])
+        total_blocks = int(transfer_lines[1])
+    except ValueError as exc:
+        raise ValidationError(f"Transfer list header is invalid: {transfer}") from exc
+    if total_blocks < 0:
+        raise ValidationError(f"Transfer list block count is invalid: {transfer}")
+    if new_dat.stat().st_size <= 0:
+        raise ValidationError(f"Generated new.dat is empty: {new_dat}")
     return ConverterResult(
         transfer_list=transfer,
         new_dat=new_dat,
-        backend=backend_name,
-        backend_version=backend_version,
-        validation=validation,
+        backend="python",
+        backend_version=_CONVERTER_VERSION,
+        validation={
+            "valid": True,
+            "transfer_version": transfer_version,
+            "transfer_line_count": len(transfer_lines),
+            "total_blocks": total_blocks,
+            "new_dat_size_bytes": new_dat.stat().st_size,
+        },
     )
 
 
@@ -108,7 +136,7 @@ def compress_zstd(
         return CompressionResult(
             output_file=output_file,
             backend=backend,
-            backend_version=_zstd_backend_version(),
+            backend_version=_ZSTD_BACKEND_VERSION,
             input_size=input_size,
             output_size=output_file.stat().st_size,
             level=level,
@@ -123,7 +151,7 @@ def compress_zstd(
     return CompressionResult(
         output_file=output_file,
         backend=backend,
-        backend_version=_zstd_backend_version(),
+        backend_version=_ZSTD_BACKEND_VERSION,
         input_size=input_size,
         output_size=output_file.stat().st_size,
         level=level,
@@ -158,18 +186,6 @@ def _sorted_images(output_dir: Path) -> list[Path]:
     return renamed
 
 
-def _convert_img_to_sparse_in_process(script_dir: Path, image_path: Path) -> None:
-    module = _load_script_module(script_dir, "img2simg")
-    output_path = image_path.with_suffix(".img.sparse")
-    blocksize = 4096
-    with image_path.open("rb") as src, output_path.open("wb") as dst:
-        writer = module.SimgWriter(dst, blocksize=blocksize)
-        while chunk := src.read(8 * 1024 * 1024):
-            writer.write(chunk)
-        writer.close()
-    output_path.replace(image_path)
-
-
 def _convert_sparse_to_dat_subprocess(script_dir: Path, image_path: Path, output_dir: Path, partition: str) -> None:
     cmd = [
         "python3",
@@ -186,34 +202,6 @@ def _convert_sparse_to_dat_subprocess(script_dir: Path, image_path: Path, output
     if completed.returncode != 0:
         message = completed.stderr.strip() or completed.stdout.strip() or "img2sdat failed"
         raise ValidationError(f"Command failed ({completed.returncode}): {' '.join(cmd)}: {message}")
-
-
-def validate_converter_output(transfer_list: Path, new_dat: Path) -> dict[str, int | bool]:
-    if not transfer_list.exists():
-        raise ValidationError(f"Missing transfer list: {transfer_list}")
-    if not new_dat.exists():
-        raise ValidationError(f"Missing new.dat output: {new_dat}")
-
-    transfer_lines = [line.strip() for line in transfer_list.read_text().splitlines() if line.strip()]
-    if len(transfer_lines) < 2:
-        raise ValidationError(f"Transfer list is too short: {transfer_list}")
-    try:
-        transfer_version = int(transfer_lines[0])
-        total_blocks = int(transfer_lines[1])
-    except ValueError as exc:
-        raise ValidationError(f"Transfer list header is invalid: {transfer_list}") from exc
-    if total_blocks < 0:
-        raise ValidationError(f"Transfer list block count is invalid: {transfer_list}")
-    if new_dat.stat().st_size <= 0:
-        raise ValidationError(f"Generated new.dat is empty: {new_dat}")
-
-    return {
-        "valid": True,
-        "transfer_version": transfer_version,
-        "transfer_line_count": len(transfer_lines),
-        "total_blocks": total_blocks,
-        "new_dat_size_bytes": new_dat.stat().st_size,
-    }
 
 
 def benchmark_converter(
@@ -258,15 +246,6 @@ def _load_script_module(script_dir: Path, module_name: str) -> types.ModuleType:
         return importlib.import_module(module_name)
 
 
-def make_executable(path: Path) -> None:
-    current = path.stat().st_mode
-    path.chmod(current | stat.S_IXUSR)
-
-
-def _converter_version() -> str:
-    return "img2sdat-1.7-captured"
-
-
 def _compress_zstd_in_process(
     input_file: Path,
     output_file: Path,
@@ -287,7 +266,3 @@ def _compress_zstd_in_process(
                 progress_callback(processed_bytes, total_bytes, processed_bytes)
         writer.close()
     input_file.unlink()
-
-
-def _zstd_backend_version() -> str:
-    return f"zstandard-{zstd.__version__}"

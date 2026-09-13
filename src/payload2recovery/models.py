@@ -45,7 +45,6 @@ class BuildOptions:
     extractor_workers: int = 0
     converter_workers: int = 0
     zstd_workers: int = 0
-    workers: int = 0
     payload_dumper_go_binary: Path | None = None
     group_table: str = "main"
     group_table_size: int | None = None
