@@ -16,6 +16,10 @@ class ResourcePaths:
     super_empty_img: Path
     default_partitions: Path
     scripts_dir: Path
+    img2simg: Path | None = None
+    simg2img: Path | None = None
+    lpunpack: Path | None = None
+    lpmake: Path | None = None
 
 
 class ResourceManager:
@@ -32,6 +36,10 @@ class ResourceManager:
         super_empty_img = self._stack.enter_context(as_file(assets / "tools" / "super_empty.img"))
         default_partitions = self._stack.enter_context(as_file(assets / "config" / "default_partitions.txt"))
         scripts_dir = self._stack.enter_context(as_file(assets / "scripts"))
+        img2simg = self._stack.enter_context(as_file(assets / "bin" / "img2simg"))
+        simg2img = self._stack.enter_context(as_file(assets / "bin" / "simg2img"))
+        lpunpack = self._stack.enter_context(as_file(assets / "bin" / "lpunpack"))
+        lpmake = self._stack.enter_context(as_file(assets / "bin" / "lpmake"))
         return ResourcePaths(
             avbctl=Path(avbctl),
             magiskboot=Path(magiskboot),
@@ -41,6 +49,10 @@ class ResourceManager:
             super_empty_img=Path(super_empty_img),
             default_partitions=Path(default_partitions),
             scripts_dir=Path(scripts_dir),
+            img2simg=Path(img2simg),
+            simg2img=Path(simg2img),
+            lpunpack=Path(lpunpack),
+            lpmake=Path(lpmake),
         )
 
     def close(self) -> None:

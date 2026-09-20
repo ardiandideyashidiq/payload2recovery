@@ -26,7 +26,7 @@ _ZSTD_BACKEND_VERSION = _BROTLI_BACKEND_VERSION
 
 
 def require_host_dependencies() -> None:
-    missing = [tool for tool in ("python3", "zip", "unzip", "xz") if shutil.which(tool) is None]
+    missing = [tool for tool in ("python3",) if shutil.which(tool) is None]
     if missing:
         raise ValidationError(f"Missing host dependencies: {', '.join(missing)}")
 
@@ -92,11 +92,11 @@ def run_payload_extractor(
     return images
 
 
-def convert_img_to_sparse(script_dir: Path, image_path: Path) -> None:
-    native_binary = shutil.which("img2simg")
+def convert_img_to_sparse(script_dir: Path, image_path: Path, img2simg_bin: Path | None = None) -> None:
+    native_binary = img2simg_bin if (img2simg_bin and img2simg_bin.is_file()) else shutil.which("img2simg")
     if native_binary:
         output_path = image_path.with_suffix(".img.sparse")
-        _run([native_binary, str(image_path), str(output_path)], verbose=False)
+        _run([str(native_binary), str(image_path), str(output_path)], verbose=False)
         output_path.replace(image_path)
         return
 
@@ -260,11 +260,12 @@ def benchmark_converter(
     output_dir: Path,
     partition: str,
     stage_callback: Callable[[str], None] | None = None,
+    img2simg_bin: Path | None = None,
 ) -> tuple[ConverterResult, dict[str, float | int | str | bool]]:
     if stage_callback is not None:
         stage_callback("sparse")
     sparse_started = perf_counter()
-    convert_img_to_sparse(script_dir, image_path)
+    convert_img_to_sparse(script_dir, image_path, img2simg_bin=img2simg_bin)
     sparse_elapsed = perf_counter() - sparse_started
 
     if stage_callback is not None:

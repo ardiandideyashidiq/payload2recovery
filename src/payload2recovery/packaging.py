@@ -91,21 +91,31 @@ def write_updater_script(
     lines.extend(_avbctl_disable_lines())
     lines.extend(_superwipe_lines())
     lines.extend(_raw_image_updater_lines(raw_images))
-    lines.append('assert(update_dynamic_partitions(package_extract_file("dynamic_partitions_op_list")));')
-    for partition in partitions:
-        dat_filename = partition.new_dat_br.name if hasattr(partition, "new_dat_br") else f"{partition.name}.new.dat.br"
-        lines.extend(
-            [
-                "",
-                f'ui_print("Flashing {partition.name}" || getprop("ro.boot.slot_suffix") || "...");',
-                (
-                    f'block_image_update(map_partition("{partition.name}"), '
-                    f'package_extract_file("{partition.transfer_list.name}"), '
-                    f'"{dat_filename}", "{partition.name}.patch.dat") ||'
-                ),
-                f'  abort("E1001: Failed to flash {partition.name}");',
-            ]
-        )
+    if not raw_images and partitions:
+        lines.append('ui_print("Updating dynamic partitions...");')
+    if partitions:
+        for mount_point in ("/system", "/system_root", "/vendor", "/product", "/system_ext", "/odm"):
+            lines.append(f'unmount("{mount_point}");')
+        for partition in partitions:
+            lines.append(f'unmap_partition("{partition.name}");')
+        lines.append('assert(update_dynamic_partitions(package_extract_file("dynamic_partitions_op_list")));')
+        for partition in partitions:
+            dat_filename = (
+                partition.new_dat_br.name if hasattr(partition, "new_dat_br") else f"{partition.name}.new.dat.br"
+            )
+            lines.extend(
+                [
+                    "",
+                    f'ui_print("Flashing {partition.name}" || getprop("ro.boot.slot_suffix") || "...");',
+                    (
+                        f'block_image_update(map_partition("{partition.name}"), '
+                        f'package_extract_file("{partition.transfer_list.name}"), '
+                        f'"{dat_filename}", "{partition.name}.patch.dat") ||'
+                    ),
+                    f'  abort("E1001: Failed to flash {partition.name}");',
+                    f'unmap_partition("{partition.name}");',
+                ]
+            )
     lines.extend(
         [
             "",
@@ -179,12 +189,26 @@ def _raw_image_updater_lines(raw_images: list[RawImageSpec]) -> list[str]:
 
 
 def _superwipe_lines() -> list[str]:
+    bind_cmd = (
+        'if ! grep -q "androidboot.slot_suffix=" /proc/cmdline; then '
+        'SLOT="$(getprop ro.boot.slot_suffix)"; '
+        '[ -z "$SLOT" ] && SLOT="$(getprop ro.boot.slot)"; '
+        '[ -n "$SLOT" ] && [ "${SLOT#_}" = "$SLOT" ] && SLOT="_$SLOT"; '
+        'if [ -n "$SLOT" ]; then '
+        "cat /proc/cmdline > /tmp/cmdline 2>/dev/null; "
+        'printf " androidboot.slot_suffix=%s\\n" "$SLOT" >> /tmp/cmdline; '
+        "mount -o bind /tmp/cmdline /proc/cmdline 2>/dev/null; "
+        "fi; fi"
+    )
+    cleanup_cmd = "umount /proc/cmdline 2>/dev/null; rm -f /tmp/cmdline"
     return [
         'ui_print("Wiping super partition metadata...");',
         'package_extract_dir("bin", "/tmp");',
         'run_program("/sbin/sh", "-c", "chmod 0755 /tmp/superwipe");',
         'run_program("/sbin/sh", "-c", "chown 0:0 /tmp/superwipe");',
+        f'run_program("/sbin/sh", "-c", "{_escape_edify_string(bind_cmd)}");',
         'run_program("/tmp/superwipe", "/tmp/super_empty.img");',
+        f'run_program("/sbin/sh", "-c", "{_escape_edify_string(cleanup_cmd)}");',
         'ui_print("");',
         "",
     ]

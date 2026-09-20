@@ -2,7 +2,10 @@ import json
 import zipfile
 from pathlib import Path
 
+import pytest
+
 import payload2recovery.pipeline as pipeline
+from payload2recovery.backends import convert_img_to_sparse
 from payload2recovery.config import Settings
 from payload2recovery.models import BuildOptions, BuildResult, CompressionResult, ConverterResult
 from payload2recovery.pipeline import (
@@ -218,8 +221,9 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
         output_dir: Path,
         partition: str,
         stage_callback=None,
+        img2simg_bin=None,
     ):
-        _ = script_dir
+        _ = script_dir, img2simg_bin
         if stage_callback is not None:
             stage_callback("dat")
         transfer = output_dir / f"{partition}.transfer.list"
@@ -320,3 +324,39 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
             "source": "default",
         },
     ]
+
+
+def test_resource_manager_opens_vendored_binaries() -> None:
+    resources = ResourceManager()
+    try:
+        paths = resources.open()
+        assert paths.img2simg is not None and paths.img2simg.is_file()
+        assert paths.simg2img is not None and paths.simg2img.is_file()
+        assert paths.lpunpack is not None and paths.lpunpack.is_file()
+        assert paths.lpmake is not None and paths.lpmake.is_file()
+    finally:
+        resources.close()
+
+
+def test_require_host_dependencies_does_not_require_zip_or_xz(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_which(cmd: str) -> str | None:
+        if cmd in {"zip", "xz", "unzip"}:
+            return None
+        return f"/usr/bin/{cmd}"
+
+    monkeypatch.setattr("shutil.which", fake_which)
+    pipeline.require_host_dependencies()
+
+
+def test_convert_img_to_sparse_with_vendored_binary(tmp_path: Path) -> None:
+    resources = ResourceManager()
+    try:
+        paths = resources.open()
+        raw_img = tmp_path / "test.img"
+        # 4KB non-zero + 8KB zeros + 4KB non-zero
+        raw_img.write_bytes(b"A" * 4096 + b"\x00" * 8192 + b"B" * 4096)
+        convert_img_to_sparse(paths.scripts_dir, raw_img, img2simg_bin=paths.img2simg)
+        # Sparse files begin with magic 0xED26FF3A
+        assert raw_img.read_bytes()[:4] == b"\x3a\xff\x26\xed"
+    finally:
+        resources.close()

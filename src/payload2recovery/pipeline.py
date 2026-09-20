@@ -436,6 +436,7 @@ def _build_partition_artifact(
             stage_output_dir,
             partition,
             stage_callback=lambda stage: progress.update(partition, stage),
+            img2simg_bin=resources.img2simg,
         )
         if not options.keep_temp and image_path.exists():
             image_path.unlink(missing_ok=True)
