@@ -136,9 +136,7 @@ def test_write_updater_script_includes_superwipe_in_correct_order(tmp_path: Path
     assert 'package_extract_dir("bin", "/tmp");' in content
     assert 'run_program("/sbin/sh", "-c", "chmod 0755 /tmp/superwipe");' in content
     assert 'run_program("/sbin/sh", "-c", "chown 0:0 /tmp/superwipe");' in content
-    assert "mount -o bind /tmp/cmdline /proc/cmdline" in content
     assert 'run_program("/tmp/superwipe", "/tmp/super_empty.img");' in content
-    assert "umount /proc/cmdline" in content
     assert content.index('run_program("/system/bin/avbctl", "--force", "disable-verification");') < content.index(
         'package_extract_dir("bin", "/tmp");'
     )
@@ -358,7 +356,10 @@ def test_write_updater_script_streaming_brotli(tmp_path: Path) -> None:
     write_updater_script(updater_script, [artifact])
     content = updater_script.read_text()
     assert "chmod 0755 /tmp/zstd" not in content
-    assert 'unmount("/system");' in content
+    assert (
+        'run_program("/sbin/sh", "-c", '
+        '"umount /system /system_root /vendor /product /system_ext /odm 2>/dev/null || true");' in content
+    )
     assert 'unmap_partition("system");' in content
     assert (
         'block_image_update(map_partition("system"), package_extract_file("system.transfer.list"), '

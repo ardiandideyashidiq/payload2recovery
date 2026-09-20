@@ -10,3 +10,5 @@ recovery.log
 input/*.zip
 input/output*/
 *.benchmark.json
+tools/wipe-super/wipe-super-host
+tools/wipe-super/superwipe

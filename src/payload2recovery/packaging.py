@@ -94,8 +94,10 @@ def write_updater_script(
     if not raw_images and partitions:
         lines.append('ui_print("Updating dynamic partitions...");')
     if partitions:
-        for mount_point in ("/system", "/system_root", "/vendor", "/product", "/system_ext", "/odm"):
-            lines.append(f'unmount("{mount_point}");')
+        lines.append(
+            'run_program("/sbin/sh", "-c", '
+            '"umount /system /system_root /vendor /product /system_ext /odm 2>/dev/null || true");'
+        )
         for partition in partitions:
             lines.append(f'unmap_partition("{partition.name}");')
         lines.append('assert(update_dynamic_partitions(package_extract_file("dynamic_partitions_op_list")));')
@@ -189,26 +191,12 @@ def _raw_image_updater_lines(raw_images: list[RawImageSpec]) -> list[str]:
 
 
 def _superwipe_lines() -> list[str]:
-    bind_cmd = (
-        'if ! grep -q "androidboot.slot_suffix=" /proc/cmdline; then '
-        'SLOT="$(getprop ro.boot.slot_suffix)"; '
-        '[ -z "$SLOT" ] && SLOT="$(getprop ro.boot.slot)"; '
-        '[ -n "$SLOT" ] && [ "${SLOT#_}" = "$SLOT" ] && SLOT="_$SLOT"; '
-        'if [ -n "$SLOT" ]; then '
-        "cat /proc/cmdline > /tmp/cmdline 2>/dev/null; "
-        'printf " androidboot.slot_suffix=%s\\n" "$SLOT" >> /tmp/cmdline; '
-        "mount -o bind /tmp/cmdline /proc/cmdline 2>/dev/null; "
-        "fi; fi"
-    )
-    cleanup_cmd = "umount /proc/cmdline 2>/dev/null; rm -f /tmp/cmdline"
     return [
         'ui_print("Wiping super partition metadata...");',
         'package_extract_dir("bin", "/tmp");',
         'run_program("/sbin/sh", "-c", "chmod 0755 /tmp/superwipe");',
         'run_program("/sbin/sh", "-c", "chown 0:0 /tmp/superwipe");',
-        f'run_program("/sbin/sh", "-c", "{_escape_edify_string(bind_cmd)}");',
         'run_program("/tmp/superwipe", "/tmp/super_empty.img");',
-        f'run_program("/sbin/sh", "-c", "{_escape_edify_string(cleanup_cmd)}");',
         'ui_print("");',
         "",
     ]
