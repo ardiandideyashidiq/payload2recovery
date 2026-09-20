@@ -31,7 +31,9 @@ def test_default_runtime_uses_all_logical_cpus() -> None:
     settings = Settings()
     expected = max(1, os.cpu_count() or 4)
     assert settings.verbose is True
-    assert settings.zstd_level == 5
+    assert settings.brotli_level == 6
+    assert settings.zstd_level == 6
     assert settings.resolved_extractor_workers() == expected
     assert settings.resolved_converter_workers() == expected
+    assert settings.resolved_brotli_workers() == expected
     assert settings.resolved_zstd_workers() == expected

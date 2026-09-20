@@ -39,21 +39,33 @@ class BuildOptions:
     mode: BuildMode
     custom_partitions: list[str] = field(default_factory=list)
     raw_partitions: list[str] = field(default_factory=list)
-    zstd_level: int = 6
+    brotli_level: int = 6
     zip_level: int = 6
     payload_threads: int = 0
     extractor_workers: int = 0
     converter_workers: int = 0
-    zstd_workers: int = 0
+    brotli_workers: int = 0
     payload_dumper_go_binary: Path | None = None
     group_table: str = "main"
     group_table_size: int | None = None
-    no_zstd: bool = False
+    no_brotli: bool = False
     keep_temp: bool = False
     output_dir: Path | None = None
     work_dir: Path | None = None
     output_name: str | None = None
     benchmark_report: Path | None = None
+
+    @property
+    def zstd_level(self) -> int:
+        return self.brotli_level
+
+    @property
+    def zstd_workers(self) -> int:
+        return self.brotli_workers
+
+    @property
+    def no_zstd(self) -> bool:
+        return self.no_brotli
 
 
 @dataclass(slots=True)
@@ -82,7 +94,7 @@ class PartitionArtifact:
     image_path: Path
     image_size: int
     transfer_list: Path
-    new_dat_zst: Path
+    new_dat_br: Path = field(default_factory=Path)
     patch_dat: Path | None = None
     converter: str = ""
     converter_version: str = ""
@@ -90,6 +102,13 @@ class PartitionArtifact:
     compressed_size: int = 0
     validation: dict[str, int | bool] = field(default_factory=dict)
     metrics: dict[str, float | int | str | bool] = field(default_factory=dict)
+    new_dat_zst: Path | None = None
+
+    def __post_init__(self) -> None:
+        if (not self.new_dat_br or str(self.new_dat_br) == ".") and self.new_dat_zst:
+            object.__setattr__(self, "new_dat_br", self.new_dat_zst)
+        elif not self.new_dat_zst and self.new_dat_br:
+            object.__setattr__(self, "new_dat_zst", self.new_dat_br)
 
 
 @dataclass(slots=True)

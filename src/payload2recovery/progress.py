@@ -255,10 +255,10 @@ class LiveProgress:
 
     def _format_status(self, state: _ProgressState, now: float) -> str:
         elapsed = max(0.0, now - state.stage_started_at)
-        if state.stage == "waiting-zstd":
+        if state.stage in {"waiting-brotli", "waiting-zstd"}:
             return f"waiting  {self._format_elapsed(elapsed)}"
-        if state.stage == "zstd":
-            return self._format_zstd_status(state, elapsed)
+        if state.stage in {"brotli", "zstd"}:
+            return self._format_compress_status(state, elapsed, state.stage)
         if state.stage == "done":
             return "done"
         return f"{state.stage} {self._format_elapsed(elapsed)}"
@@ -274,19 +274,25 @@ class LiveProgress:
             f"{mode} {current} {self._format_elapsed(elapsed)}"
         )
 
-    def _format_zstd_status(self, state: _ProgressState, elapsed: float) -> str:
+    def _format_compress_status(self, state: _ProgressState, elapsed: float, stage_name: str = "brotli") -> str:
         if state.total_bytes <= 0:
-            return f"zstd {self._format_elapsed(elapsed)}"
+            return f"{stage_name} {self._format_elapsed(elapsed)}"
         percent = min(100.0, (state.processed_bytes / state.total_bytes) * 100)
         speed = state.processed_bytes / max(elapsed, 0.001)
         return (
-            f"zstd {percent:>3.0f}% "
+            f"{stage_name} {percent:>3.0f}% "
             f"{self._format_mib(state.processed_bytes)}/{self._format_mib(state.total_bytes)} "
             f"{self._format_mib(speed)}/s {self._format_elapsed(elapsed)}"
         )
 
+    def _format_zstd_status(self, state: _ProgressState, elapsed: float) -> str:
+        return self._format_compress_status(state, elapsed, "zstd")
+
+    def _format_brotli_status(self, state: _ProgressState, elapsed: float) -> str:
+        return self._format_compress_status(state, elapsed, "brotli")
+
     def _task_progress_for_state(self, state: _ProgressState) -> tuple[float | None, float]:
-        if state.stage == "zstd" and state.total_bytes > 0:
+        if state.stage in {"brotli", "zstd"} and state.total_bytes > 0:
             return float(state.total_bytes), float(state.processed_bytes)
         if state.stage == "done":
             total = float(max(1, state.total_bytes or state.processed_bytes or 1))
@@ -296,7 +302,7 @@ class LiveProgress:
         return None, 0.0
 
     def _speed_for_state(self, state: _ProgressState, now: float) -> str:
-        if state.stage != "zstd" or state.total_bytes <= 0:
+        if state.stage not in {"brotli", "zstd"} or state.total_bytes <= 0:
             return "-"
         elapsed = max(0.001, now - state.stage_started_at)
         speed = state.processed_bytes / elapsed
@@ -304,7 +310,7 @@ class LiveProgress:
 
     @staticmethod
     def _display_stage(stage: str) -> str:
-        if stage == "waiting-zstd":
+        if stage in {"waiting-brotli", "waiting-zstd"}:
             return "waiting"
         return stage
 
@@ -314,8 +320,12 @@ class LiveProgress:
             return f"{partition}.img"
         if stage == "dat":
             return f"{partition}.transfer.list"
-        if stage in {"waiting-zstd", "zstd", "done"}:
+        if stage in {"waiting-brotli", "brotli"}:
+            return f"{partition}.new.dat.br"
+        if stage in {"waiting-zstd", "zstd"}:
             return f"{partition}.new.dat.zst"
+        if stage == "done":
+            return f"{partition}.new.dat.br"
         if stage.endswith("failed"):
             return partition
         return partition

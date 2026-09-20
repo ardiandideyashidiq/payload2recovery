@@ -343,18 +343,20 @@ def test_build_flashable_zip_includes_superwipe_and_zstd_bin(tmp_path: Path) -> 
         assert archive.read("bin/zstd") == b"zstd-bin"
 
 
-def test_write_updater_script_includes_zstd_decompress(tmp_path: Path) -> None:
+def test_write_updater_script_streaming_brotli(tmp_path: Path) -> None:
     artifact = PartitionArtifact(
         name="system",
         image_path=tmp_path / "system.img",
         image_size=1234,
         transfer_list=tmp_path / "system.transfer.list",
-        new_dat_zst=tmp_path / "system.new.dat.zst",
+        new_dat_br=tmp_path / "system.new.dat.br",
         patch_dat=tmp_path / "system.patch.dat",
     )
     updater_script = tmp_path / "updater-script"
     write_updater_script(updater_script, [artifact])
     content = updater_script.read_text()
-    assert "chmod 0755 /tmp/zstd" in content
-    assert 'run_program("/tmp/zstd", "-d", "system.new.dat.zst")' in content
-    assert '"system.new.dat"' in content
+    assert "chmod 0755 /tmp/zstd" not in content
+    assert (
+        'block_image_update(map_partition("system"), package_extract_file("system.transfer.list"), '
+        '"system.new.dat.br", "system.patch.dat")' in content
+    )

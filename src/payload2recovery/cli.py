@@ -140,7 +140,15 @@ def _add_common_build_args(parser: argparse.ArgumentParser) -> None:
         nargs="+",
         help="Space-separated partition names. Defaults to the configured template.",
     )
-    parser.add_argument("-b", "--zstd-level", type=int, default=None, help="Zstd level 1-22")
+    parser.add_argument(
+        "-b",
+        "--brotli-level",
+        "--zstd-level",
+        dest="brotli_level",
+        type=int,
+        default=None,
+        help="Brotli level 0-11",
+    )
     parser.add_argument("-z", "--zip-level", type=int, default=None, help="ZIP level 0-9")
     parser.add_argument(
         "--payload-threads",
@@ -161,10 +169,12 @@ def _add_common_build_args(parser: argparse.ArgumentParser) -> None:
         help="Concurrent partition conversion workers",
     )
     parser.add_argument(
+        "--brotli-workers",
         "--zstd-workers",
+        dest="brotli_workers",
         type=int,
         default=0,
-        help="Maximum concurrent zstd jobs across selected partitions",
+        help="Maximum concurrent brotli jobs across selected partitions",
     )
     parser.add_argument(
         "-j",
@@ -187,9 +197,11 @@ def _add_common_build_args(parser: argparse.ArgumentParser) -> None:
         help="Explicit group size in bytes. Defaults to computed size.",
     )
     parser.add_argument(
+        "--no-brotli",
         "--no-zstd",
+        dest="no_brotli",
         action="store_true",
-        help="Skip zstd compression and keep *.new.dat.zst as a renamed dat file",
+        help="Skip brotli compression and keep *.new.dat.br as a renamed dat file",
     )
     parser.add_argument(
         "--raw-partitions",
@@ -201,24 +213,34 @@ def _add_common_build_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _options_from_args(args: argparse.Namespace, settings: Settings) -> BuildOptions:
-    partitions = args.partitions or []
+    partitions = getattr(args, "partitions", None) or []
     mode = BuildMode.ALL if getattr(args, "all", False) else BuildMode.MANUAL if partitions else BuildMode.TEMPLATE
-    converter_workers = args.converter_workers or args.workers
+    converter_workers = getattr(args, "converter_workers", 0) or getattr(args, "workers", 0)
+    brotli_level = getattr(args, "brotli_level", None)
+    if brotli_level is None:
+        brotli_level = getattr(args, "zstd_level", None)
+    if brotli_level is None:
+        brotli_level = settings.brotli_level
+
+    brotli_workers = getattr(args, "brotli_workers", 0) or getattr(args, "zstd_workers", 0)
+    no_brotli = bool(getattr(args, "no_brotli", False) or getattr(args, "no_zstd", False))
+    zip_level = getattr(args, "zip_level", None)
+
     return BuildOptions(
         ota_zip=args.ota_zip,
         mode=mode,
         custom_partitions=partitions,
-        raw_partitions=args.raw_partitions or [],
-        zstd_level=args.zstd_level if args.zstd_level is not None else settings.zstd_level,
-        zip_level=args.zip_level if args.zip_level is not None else settings.zip_level,
-        payload_threads=args.payload_threads,
-        extractor_workers=args.extractor_workers,
+        raw_partitions=getattr(args, "raw_partitions", []) or [],
+        brotli_level=brotli_level,
+        zip_level=zip_level if zip_level is not None else settings.zip_level,
+        payload_threads=getattr(args, "payload_threads", 0),
+        extractor_workers=getattr(args, "extractor_workers", 0),
         converter_workers=converter_workers,
-        zstd_workers=args.zstd_workers,
-        payload_dumper_go_binary=args.payload_dumper_go_binary or settings.payload_dumper_go_binary,
-        group_table=args.group_table or settings.group_table,
-        group_table_size=args.group_table_size,
-        no_zstd=args.no_zstd,
+        brotli_workers=brotli_workers,
+        payload_dumper_go_binary=getattr(args, "payload_dumper_go_binary", None) or settings.payload_dumper_go_binary,
+        group_table=getattr(args, "group_table", None) or settings.group_table,
+        group_table_size=getattr(args, "group_table_size", None),
+        no_brotli=no_brotli,
         keep_temp=getattr(args, "keep_temp", False),
         output_dir=getattr(args, "output_dir", None),
         work_dir=getattr(args, "work_dir", None),

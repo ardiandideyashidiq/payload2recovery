@@ -92,8 +92,8 @@ def write_updater_script(
     lines.extend(_superwipe_lines())
     lines.extend(_raw_image_updater_lines(raw_images))
     lines.append('assert(update_dynamic_partitions(package_extract_file("dynamic_partitions_op_list")));')
-    lines.extend(_zstd_decompress_lines(partitions))
     for partition in partitions:
+        dat_filename = partition.new_dat_br.name if hasattr(partition, "new_dat_br") else f"{partition.name}.new.dat.br"
         lines.extend(
             [
                 "",
@@ -101,7 +101,7 @@ def write_updater_script(
                 (
                     f'block_image_update(map_partition("{partition.name}"), '
                     f'package_extract_file("{partition.transfer_list.name}"), '
-                    f'"{partition.name}.new.dat", "{partition.name}.patch.dat") ||'
+                    f'"{dat_filename}", "{partition.name}.patch.dat") ||'
                 ),
                 f'  abort("E1001: Failed to flash {partition.name}");',
             ]
@@ -190,16 +190,6 @@ def _superwipe_lines() -> list[str]:
     ]
 
 
-def _zstd_decompress_lines(partitions: list[PartitionArtifact]) -> list[str]:
-    lines = [
-        'ui_print("Decompressing zstd partitions...");',
-        'run_program("/sbin/sh", "-c", "chmod 0755 /tmp/zstd");',
-    ]
-    for partition in partitions:
-        lines.append(f'run_program("/tmp/zstd", "-d", "{partition.name}.new.dat.zst");')
-    return lines
-
-
 def _avbctl_disable_lines() -> list[str]:
     return [
         'ui_print("Disabling AVB vbmeta...");',
@@ -236,7 +226,7 @@ def build_flashable_zip(
     zip_level: int,
     superwipe_binary: Path,
     super_empty_img: Path,
-    zstd_binary: Path,
+    zstd_binary: Path | None = None,
     progress_callback: Callable[[str, int, int, int, int, bool], None] | None = None,
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -250,7 +240,8 @@ def build_flashable_zip(
     bin_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(superwipe_binary, bin_dir / "superwipe")
     shutil.copy2(super_empty_img, bin_dir / "super_empty.img")
-    shutil.copy2(zstd_binary, bin_dir / "zstd")
+    if zstd_binary is not None and zstd_binary.is_file():
+        shutil.copy2(zstd_binary, bin_dir / "zstd")
 
     file_entries = [path for path in sorted(payload_dir.rglob("*")) if path.is_file()]
     total_files = len(file_entries)
@@ -261,7 +252,7 @@ def build_flashable_zip(
         bytes_done = 0
         for index, file_path in enumerate(file_entries, start=1):
             arcname = file_path.relative_to(payload_dir)
-            store_entry = file_path.suffix == ".zst"
+            store_entry = file_path.suffix in {".br", ".zst"}
             if progress_callback is not None:
                 progress_callback(
                     arcname.as_posix(),

@@ -12,8 +12,9 @@ from uuid import uuid4
 from payload2recovery import __version__
 from payload2recovery.backends import (
     benchmark_converter,
-    compress_zstd,
+    compress_brotli,
     extract_payload_bin,
+    list_payload_partitions,
     require_host_dependencies,
     resolve_payload_dumper_go_binary,
     run_payload_extractor,
@@ -145,6 +146,11 @@ def build(options: BuildOptions, settings: Settings, resources: ResourcePaths) -
         ):
             payload_bin = extract_payload_bin(options.ota_zip, workspace)
 
+        manifest_partitions = list_payload_partitions(extractor_binary, payload_bin)
+        selected_for_extraction = _extractor_selected_partitions(
+            options, settings=settings, manifest_partitions=manifest_partitions
+        )
+
         with (
             stage_timer("Extracting partition images", LOGGER),
             metrics.stage("extract_partitions"),
@@ -155,7 +161,7 @@ def build(options: BuildOptions, settings: Settings, resources: ResourcePaths) -
                 output_dir=partitions_dir,
                 workers=_resolved_extractor_workers(options, settings),
                 verbose=settings.verbose,
-                selected_partitions=_extractor_selected_partitions(options),
+                selected_partitions=selected_for_extraction,
             )
         if not extracted:
             raise ValidationError("No partition images were extracted from payload.bin")
@@ -258,7 +264,6 @@ def build(options: BuildOptions, settings: Settings, resources: ResourcePaths) -
                     options.zip_level,
                     resources.superwipe,
                     resources.super_empty_img,
-                    resources.zstd,
                     progress_callback=lambda cur, done, total, bdone, btotal, store: zip_progress.update_package(
                         cur,
                         done,
@@ -297,13 +302,16 @@ def build(options: BuildOptions, settings: Settings, resources: ResourcePaths) -
                 ],
                 "extractor_workers": _resolved_extractor_workers(options, settings),
                 "converter_workers": _resolved_converter_workers(options, settings),
-                "zstd_workers": _resolved_zstd_workers(options, settings),
+                "brotli_workers": _resolved_brotli_workers(options, settings),
+                "zstd_workers": _resolved_brotli_workers(options, settings),
                 "device_assertion_enabled": device_assertion.enabled,
                 "device_assertion_names": device_assertion.device_names,
                 "device_assertion_source": device_assertion.source,
                 "artifact_size_bytes": final_output.stat().st_size,
                 "converter_version": artifacts[0].converter_version if artifacts else "",
-                "zstd_backend": "zstandard",
+                "brotli_backend": "python-brotli",
+                "brotli_backend_version": artifacts[0].metrics.get("brotli_backend_version", "") if artifacts else "",
+                "zstd_backend": "python-brotli",
                 "zstd_backend_version": artifacts[0].metrics.get("zstd_backend_version", "") if artifacts else "",
                 "partition_metrics": partition_metrics,
                 "total_raw_dat_bytes": sum(artifact.raw_dat_size for artifact in artifacts),
@@ -332,6 +340,22 @@ def list_partitions(options: BuildOptions, settings: Settings, resources: Resour
     )
     with _Workspace(options) as workspace:
         payload_bin = extract_payload_bin(options.ota_zip, workspace)
+        manifest_names = list_payload_partitions(extractor_binary, payload_bin)
+        if manifest_names:
+            fake_paths = [Path(f"{name}.img") for name in manifest_names]
+            supported, default_raw, excluded_raw, unsupported, auto_raw, skipped = _classify_extracted_partitions(
+                fake_paths
+            )
+            return [
+                ListedPartition(
+                    name=name,
+                    supported=name in supported or name in default_raw or name in auto_raw,
+                    status=_list_partition_status(
+                        name, supported, default_raw, excluded_raw, unsupported, auto_raw, skipped
+                    ),
+                )
+                for name in manifest_names
+            ]
         extracted = run_payload_extractor(
             extractor=extractor_binary,
             payload_path=payload_bin,
@@ -361,10 +385,10 @@ def _process_partitions(
     resources: ResourcePaths,
 ) -> tuple[list[PartitionArtifact], list[dict[str, float | int | str | bool]]]:
     workers = _resolved_converter_workers(options, settings)
-    zstd_slots = _resolved_zstd_workers(options, settings)
+    brotli_slots = _resolved_brotli_workers(options, settings)
     LOGGER.info("Using %d conversion workers", workers)
-    LOGGER.info("Using %d zstd slots", zstd_slots)
-    zstd_gate = BoundedSemaphore(zstd_slots)
+    LOGGER.info("Using %d brotli slots", brotli_slots)
+    brotli_gate = BoundedSemaphore(brotli_slots)
     progress = LiveProgress(enabled=settings.verbose)
     results: list[PartitionArtifact] = []
     partition_metrics: list[dict[str, float | int | str | bool]] = []
@@ -378,7 +402,7 @@ def _process_partitions(
                     options,
                     settings,
                     resources,
-                    zstd_gate,
+                    brotli_gate,
                     progress,
                 )
                 for image_path in selected
@@ -400,7 +424,7 @@ def _build_partition_artifact(
     options: BuildOptions,
     settings: Settings,
     resources: ResourcePaths,
-    zstd_gate: BoundedSemaphore,
+    brotli_gate: BoundedSemaphore,
     progress: LiveProgress,
 ) -> PartitionArtifact:
     partition = image_path.stem
@@ -413,33 +437,39 @@ def _build_partition_artifact(
             partition,
             stage_callback=lambda stage: progress.update(partition, stage),
         )
+        if not options.keep_temp and image_path.exists():
+            image_path.unlink(missing_ok=True)
         new_dat = converter_result.new_dat
-        progress.update(partition, "waiting-zstd")
-        with zstd_gate:
+        progress.update(partition, "waiting-brotli")
+        with brotli_gate:
             progress.update(
                 partition,
-                "zstd",
+                "brotli",
                 processed_bytes=0,
                 total_bytes=new_dat.stat().st_size,
                 output_bytes=0,
             )
-            zstd_started = time.perf_counter()
-            compression_result = compress_zstd(
+            brotli_started = time.perf_counter()
+            compression_result = compress_brotli(
                 new_dat,
-                level=options.zstd_level,
-                enabled=settings.compression and not options.no_zstd,
+                level=options.brotli_level,
+                enabled=settings.compression and not options.no_brotli,
                 verbose=False,
-                workers=_resolved_zstd_workers(options, settings),
+                workers=_resolved_brotli_workers(options, settings),
                 progress_callback=lambda processed, total, written: progress.update(
                     partition,
-                    "zstd",
+                    "brotli",
                     processed_bytes=processed,
                     total_bytes=total,
                     output_bytes=written,
                 ),
             )
-            zstd_seconds = time.perf_counter() - zstd_started
-            metrics["zstd_seconds"] = zstd_seconds
+            brotli_seconds = time.perf_counter() - brotli_started
+            metrics["brotli_seconds"] = brotli_seconds
+            metrics["zstd_seconds"] = brotli_seconds
+        metrics["brotli_backend"] = compression_result.backend
+        metrics["brotli_backend_version"] = compression_result.backend_version
+        metrics["brotli_level"] = compression_result.level
         metrics["zstd_backend"] = compression_result.backend
         metrics["zstd_backend_version"] = compression_result.backend_version
         metrics["zstd_level"] = compression_result.level
@@ -448,7 +478,7 @@ def _build_partition_artifact(
             compression_result.output_size / compression_result.input_size if compression_result.input_size else 0.0
         )
         metrics["compression_mib_per_sec"] = float(compression_result.input_size / (1024 * 1024)) / float(
-            metrics.get("zstd_seconds", 0.000001)
+            metrics.get("brotli_seconds", 0.000001)
         )
         patch_dat = stage_output_dir / f"{partition}.patch.dat"
         if not patch_dat.exists():
@@ -458,7 +488,7 @@ def _build_partition_artifact(
             image_path=image_path,
             image_size=image_size,
             transfer_list=converter_result.transfer_list,
-            new_dat_zst=compression_result.output_file,
+            new_dat_br=compression_result.output_file,
             patch_dat=patch_dat,
             converter=converter_result.backend,
             converter_version=converter_result.backend_version,
@@ -595,7 +625,35 @@ def _selected_raw_images(
     return raw_images
 
 
-def _extractor_selected_partitions(options: BuildOptions) -> list[str] | None:
+def _extractor_selected_partitions(
+    options: BuildOptions,
+    settings: Settings | None = None,
+    manifest_partitions: list[str] | None = None,
+) -> list[str] | None:
+    if manifest_partitions:
+        manifest_set = set(manifest_partitions)
+        if options.mode == "manual":
+            requested = set(options.custom_partitions)
+        elif options.mode == "all":
+            requested = _KNOWN_LOGICAL_PARTITIONS
+        else:
+            default_parts = settings.default_partitions if settings else []
+            requested = set(default_parts)
+
+        raw_candidates = _ALWAYS_DEFAULT_RAW_PARTITIONS | _DEFAULT_RAW_PROBES | set(options.raw_partitions)
+
+        firmware_candidates = {
+            name
+            for name in manifest_partitions
+            if name not in UNSUPPORTED_PARTITIONS
+            and name not in _RECOVERY_SKIP_PARTITIONS
+            and name not in _KNOWN_LOGICAL_PARTITIONS
+            and not _is_explicit_raw_partition(name)
+        }
+
+        needed = (requested | raw_candidates | firmware_candidates) & manifest_set
+        return sorted(needed) or None
+
     if options.mode != "manual":
         return None
     selected = sorted(
@@ -704,10 +762,14 @@ def _resolved_converter_workers(options: BuildOptions, settings: Settings) -> in
     return settings.resolved_converter_workers()
 
 
+def _resolved_brotli_workers(options: BuildOptions, settings: Settings) -> int:
+    if options.brotli_workers > 0:
+        return max(1, options.brotli_workers)
+    return settings.resolved_brotli_workers()
+
+
 def _resolved_zstd_workers(options: BuildOptions, settings: Settings) -> int:
-    if options.zstd_workers > 0:
-        return max(1, options.zstd_workers)
-    return settings.resolved_zstd_workers()
+    return _resolved_brotli_workers(options, settings)
 
 
 def _output_name(options: BuildOptions, _settings: Settings) -> str:

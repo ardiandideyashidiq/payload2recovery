@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import re
 import shutil
 import subprocess
 import sys
@@ -12,7 +13,7 @@ from pathlib import Path
 from threading import Lock
 from time import perf_counter
 
-import zstandard as zstd
+import brotli  # type: ignore[import-untyped]
 
 from payload2recovery.errors import ValidationError
 from payload2recovery.models import CompressionResult, ConverterResult
@@ -20,7 +21,8 @@ from payload2recovery.models import CompressionResult, ConverterResult
 LOGGER = logging.getLogger(__name__)
 _CONVERTER_IMPORT_LOCK = Lock()
 _CONVERTER_VERSION = "img2sdat-1.7-captured"
-_ZSTD_BACKEND_VERSION = f"zstandard-{zstd.__version__}"
+_BROTLI_BACKEND_VERSION = f"brotli-{brotli.__version__}"
+_ZSTD_BACKEND_VERSION = _BROTLI_BACKEND_VERSION
 
 
 def require_host_dependencies() -> None:
@@ -36,12 +38,35 @@ def resolve_payload_dumper_go_binary(vendored_binary: Path, override_binary: Pat
     return candidate
 
 
+def list_payload_partitions(extractor: Path, payload_path: Path) -> list[str]:
+    cmd = [str(extractor), "-l", str(payload_path)]
+    completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if completed.returncode != 0:
+        return []
+    match = re.search(r"Found partitions:\s*([^\n]+(?:\n\s*[^\n]+)*)", completed.stdout)
+    if not match:
+        return []
+    return re.findall(r"(\b[a-zA-Z0-9_]+)\s+\([0-9.]+\s+[kKMGT]?B\)", match.group(0))
+
+
 def extract_payload_bin(ota_zip: Path, work_dir: Path) -> Path:
     payload_path = work_dir / "payload.bin"
+    unzip_bin = shutil.which("unzip")
+    if unzip_bin:
+        result = subprocess.run(
+            [unzip_bin, "-q", "-o", str(ota_zip), "payload.bin", "-d", str(work_dir)],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if result.returncode == 0 and payload_path.is_file():
+            return payload_path
+
     with zipfile.ZipFile(ota_zip) as archive:
         try:
             with archive.open("payload.bin") as src, payload_path.open("wb") as dst:
-                shutil.copyfileobj(src, dst)
+                while chunk := src.read(8 * 1024 * 1024):
+                    dst.write(chunk)
         except KeyError as exc:
             raise ValidationError("OTA zip does not contain payload.bin") from exc
     return payload_path
@@ -68,6 +93,13 @@ def run_payload_extractor(
 
 
 def convert_img_to_sparse(script_dir: Path, image_path: Path) -> None:
+    native_binary = shutil.which("img2simg")
+    if native_binary:
+        output_path = image_path.with_suffix(".img.sparse")
+        _run([native_binary, str(image_path), str(output_path)], verbose=False)
+        output_path.replace(image_path)
+        return
+
     module = _load_script_module(script_dir, "img2simg")
     output_path = image_path.with_suffix(".img.sparse")
     blocksize = 4096
@@ -119,6 +151,46 @@ def convert_sparse_to_dat(
     )
 
 
+def compress_brotli(
+    input_file: Path,
+    level: int,
+    enabled: bool,
+    verbose: bool,
+    workers: int = 0,
+    progress_callback: Callable[[int, int, int], None] | None = None,
+) -> CompressionResult:
+    output_file = input_file.with_suffix(input_file.suffix + ".br")
+    input_size = input_file.stat().st_size
+    _ = workers
+    backend = "python-brotli"
+    if not enabled:
+        input_file.replace(output_file)
+        return CompressionResult(
+            output_file=output_file,
+            backend=backend,
+            backend_version=_BROTLI_BACKEND_VERSION,
+            input_size=input_size,
+            output_size=output_file.stat().st_size,
+            level=level,
+            enabled=False,
+        )
+
+    if verbose:
+        LOGGER.info("Compressing %s with python-brotli level %d", input_file.name, level)
+    _compress_brotli_in_process(input_file, output_file, level, progress_callback=progress_callback)
+    if not output_file.exists():
+        raise ValidationError(f"Brotli output missing: {output_file}")
+    return CompressionResult(
+        output_file=output_file,
+        backend=backend,
+        backend_version=_BROTLI_BACKEND_VERSION,
+        input_size=input_size,
+        output_size=output_file.stat().st_size,
+        level=level,
+        enabled=True,
+    )
+
+
 def compress_zstd(
     input_file: Path,
     level: int,
@@ -127,35 +199,13 @@ def compress_zstd(
     workers: int = 0,
     progress_callback: Callable[[int, int, int], None] | None = None,
 ) -> CompressionResult:
-    output_file = input_file.with_suffix(input_file.suffix + ".zst")
-    input_size = input_file.stat().st_size
-    _ = workers
-    backend = "zstandard"
-    if not enabled:
-        input_file.replace(output_file)
-        return CompressionResult(
-            output_file=output_file,
-            backend=backend,
-            backend_version=_ZSTD_BACKEND_VERSION,
-            input_size=input_size,
-            output_size=output_file.stat().st_size,
-            level=level,
-            enabled=False,
-        )
-
-    if verbose:
-        LOGGER.info("Compressing %s with zstd level %d", input_file.name, level)
-    _compress_zstd_in_process(input_file, output_file, level, progress_callback=progress_callback)
-    if not output_file.exists():
-        raise ValidationError(f"Zstd output missing: {output_file}")
-    return CompressionResult(
-        output_file=output_file,
-        backend=backend,
-        backend_version=_ZSTD_BACKEND_VERSION,
-        input_size=input_size,
-        output_size=output_file.stat().st_size,
-        level=level,
-        enabled=True,
+    return compress_brotli(
+        input_file,
+        level,
+        enabled,
+        verbose,
+        workers,
+        progress_callback=progress_callback,
     )
 
 
@@ -246,23 +296,31 @@ def _load_script_module(script_dir: Path, module_name: str) -> types.ModuleType:
         return importlib.import_module(module_name)
 
 
-def _compress_zstd_in_process(
+def _compress_brotli_in_process(
     input_file: Path,
     output_file: Path,
     level: int,
     progress_callback: Callable[[int, int, int], None] | None = None,
 ) -> None:
-    cctx = zstd.ZstdCompressor(level=level)
+    compressor = brotli.Compressor(mode=brotli.MODE_GENERIC, quality=level, lgwin=24)
     total_bytes = input_file.stat().st_size
     processed_bytes = 0
+    written_bytes = 0
     with input_file.open("rb") as src, output_file.open("wb") as dst:
-        writer = cctx.stream_writer(dst)
         if progress_callback is not None:
             progress_callback(0, total_bytes, 0)
         while chunk := src.read(8 * 1024 * 1024):
-            writer.write(chunk)
             processed_bytes += len(chunk)
+            compressed = compressor.process(chunk)
+            if compressed:
+                dst.write(compressed)
+                written_bytes += len(compressed)
             if progress_callback is not None:
-                progress_callback(processed_bytes, total_bytes, processed_bytes)
-        writer.close()
+                progress_callback(processed_bytes, total_bytes, written_bytes)
+        tail = compressor.finish()
+        if tail:
+            dst.write(tail)
+            written_bytes += len(tail)
+        if progress_callback is not None:
+            progress_callback(total_bytes, total_bytes, written_bytes)
     input_file.unlink()

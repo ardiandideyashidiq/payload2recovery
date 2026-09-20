@@ -41,7 +41,7 @@ def test_write_benchmark_report_keeps_partition_metrics(tmp_path: Path) -> None:
                 {
                     "partition": "system_ext",
                     "backend": "python",
-                    "zstd_backend": "zstandard",
+                    "brotli_backend": "brotli",
                     "valid": True,
                     "new_dat_size_bytes": 123,
                 }
@@ -237,7 +237,7 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
             {"partition": partition, "backend": "python"},
         )
 
-    def fake_compress_zstd(
+    def fake_compress_brotli(
         input_file: Path,
         level: int,
         enabled: bool,
@@ -246,7 +246,7 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
         progress_callback=None,
     ):
         _ = verbose, workers
-        output_file = input_file.with_suffix(input_file.suffix + ".zst")
+        output_file = input_file.with_suffix(input_file.suffix + ".br")
         data = input_file.read_bytes()
         output_file.write_bytes(data)
         input_file.unlink()
@@ -254,7 +254,7 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
             progress_callback(len(data), len(data), len(data))
         return CompressionResult(
             output_file=output_file,
-            backend="zstandard",
+            backend="brotli",
             backend_version="test",
             input_size=len(data),
             output_size=len(data),
@@ -267,7 +267,7 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
     monkeypatch.setattr(pipeline, "extract_payload_bin", fake_extract_payload_bin)
     monkeypatch.setattr(pipeline, "run_payload_extractor", fake_run_payload_extractor)
     monkeypatch.setattr(pipeline, "benchmark_converter", fake_benchmark_converter)
-    monkeypatch.setattr(pipeline, "compress_zstd", fake_compress_zstd)
+    monkeypatch.setattr(pipeline, "compress_brotli", fake_compress_brotli)
     monkeypatch.setattr(pipeline, "detect_device_assertion", lambda _ota: pipeline.DeviceAssertion())
 
     settings = Settings(default_partitions=["system"], verbose=False)
@@ -288,11 +288,12 @@ def test_build_stages_default_and_explicit_raw_images(tmp_path: Path, monkeypatc
     with zipfile.ZipFile(result.output_path) as archive:
         names = set(archive.namelist())
         assert "bin/avbctl" in names
-        assert "bin/zstd" in names
+        assert "bin/zstd" not in names
         assert "boot.img" in names
         assert "logo.bin" in names
         assert "lk.img" in names
         assert "system.transfer.list" in names
+        assert "system.new.dat.br" in names
         updater_script = archive.read("META-INF/com/google/android/updater-script").decode()
     assert 'package_extract_file("logo.bin", "/dev/block/by-name/logo");' in updater_script
     assert 'package_extract_file("lk.img", "/dev/block/by-name/lk_a")' in updater_script

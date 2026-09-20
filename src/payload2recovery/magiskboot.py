@@ -35,7 +35,7 @@ def probe_image(path: Path, magiskboot_bin: Path) -> MagiskbootProbe:
 
     with tempfile.TemporaryDirectory(prefix="p2r-magisk-") as tmpdir:
         result = subprocess.run(
-            [str(magiskboot_bin), "unpack", "-h", str(path)],
+            [str(magiskboot_bin.resolve()), "unpack", "-h", str(path.resolve())],
             cwd=tmpdir,
             capture_output=True,
             text=True,
